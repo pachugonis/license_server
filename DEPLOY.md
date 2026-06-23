@@ -9,8 +9,8 @@
 systemd-сервис и nginx reverse-proxy на ваш домен с HTTPS.
 
 ```bash
-# на VPS, из корня репозитория (где лежит папка LICENSE)
-sudo bash LICENSE/install-license-server.sh
+# на VPS, из каталога с файлами этого репозитория
+sudo bash install-license-server.sh
 ```
 
 Скрипт спросит домен, логин/пароль администратора (пароль можно сгенерировать),
@@ -19,7 +19,7 @@ sudo bash LICENSE/install-license-server.sh
 
 ```bash
 sudo DOMAIN=license.example.com ENABLE_SSL=y LE_EMAIL=you@example.com \
-  bash LICENSE/install-license-server.sh
+  bash install-license-server.sh
 ```
 
 После установки веб-админка доступна на `https://<домен>/admin`. Повторный запуск
@@ -36,8 +36,8 @@ sudo apt-get install -y nodejs
 sudo useradd --system --create-home --shell /usr/sbin/nologin license
 sudo mkdir -p /opt/license-server/releases
 
-# 3. Файлы сервера (с локальной машины, без node_modules)
-sudo rsync -a --exclude node_modules LICENSE/ /opt/license-server/
+# 3. Файлы сервера (из этого репозитория, без node_modules)
+sudo rsync -a --exclude node_modules ./ /opt/license-server/
 cd /opt/license-server
 sudo -u license npm ci --omit=dev
 

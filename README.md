@@ -4,9 +4,9 @@
 подписанных релизов** клиентским установкам. Разворачивается на **вашем** сервере
 (не у клиента). Хранилище — JSON-файл `license-database.json`.
 
-Установщик клиента ([../INSTALL/install.sh](../INSTALL/install.sh)) активирует
-лицензию на этом сервере и скачивает отсюда подписанный артефакт релиза; кнопка
-«Обновить» в админке клиента так же берёт обновления отсюда.
+Клиентский установщик (`INSTALL/install.sh` в основном репозитории ExchangeKit)
+активирует лицензию на этом сервере и скачивает отсюда подписанный артефакт
+релиза; кнопка «Обновить» в админке клиента так же берёт обновления отсюда.
 
 ## Содержание
 
@@ -52,7 +52,7 @@ curl http://localhost:3001/api/health
 и reverse-proxy c HTTPS одной командой):
 
 ```bash
-sudo bash LICENSE/install-license-server.sh
+sudo bash install-license-server.sh
 ```
 
 Подробности — [DEPLOY.md](./DEPLOY.md). Ниже — ручная установка по шагам.
@@ -62,8 +62,8 @@ sudo bash LICENSE/install-license-server.sh
 sudo useradd --system --create-home --shell /usr/sbin/nologin license
 sudo mkdir -p /opt/license-server/releases
 
-# 2. Файлы сервера (без node_modules)
-sudo rsync -a --exclude node_modules LICENSE/ /opt/license-server/
+# 2. Файлы сервера (из этого репозитория, без node_modules)
+sudo rsync -a --exclude node_modules ./ /opt/license-server/
 cd /opt/license-server
 sudo -u license npm ci --omit=dev
 
@@ -111,8 +111,8 @@ sudo ufw allow 'Nginx Full'
 
 ## Публикация релизов
 
-Артефакты собирает и подписывает [../INSTALL/release.sh](../INSTALL/release.sh)
-(на машине сборки), сервер только их раздаёт из `RELEASES_DIR`.
+Артефакты собирает и подписывает `INSTALL/release.sh` из основного репозитория
+ExchangeKit (на машине сборки), сервер только их раздаёт из `RELEASES_DIR`.
 
 ```bash
 # один раз — пара ключей подписи (приватный НЕ коммитить и НЕ передавать)
