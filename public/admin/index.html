@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>ExchangeKit · License Admin</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #131a23;
+      --panel-2: #1a232e;
+      --border: #243140;
+      --text: #e6edf3;
+      --muted: #8b9aab;
+      --accent: #4f8cff;
+      --accent-2: #3b6fd6;
+      --green: #2ec27e;
+      --amber: #e0a526;
+      --red: #e5484d;
+      --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: radial-gradient(1200px 600px at 80% -10%, #16202c 0%, var(--bg) 55%);
+      color: var(--text);
+      font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    button { font: inherit; cursor: pointer; }
+    a { color: var(--accent); }
+
+    /* ---------- Login ---------- */
+    #login {
+      min-height: 100%;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.35);
+    }
+    .login-box { width: 360px; max-width: 100%; padding: 28px; }
+    .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
+    .brand .dot { width: 28px; height: 28px; border-radius: 8px;
+      background: linear-gradient(135deg, var(--accent), #7b5cff); }
+    .brand h1 { font-size: 16px; margin: 0; letter-spacing: .2px; }
+    .brand small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
+    label { display: block; color: var(--muted); font-size: 12px; margin: 14px 0 6px; }
+    input, select {
+      width: 100%; padding: 10px 12px; color: var(--text);
+      background: var(--bg); border: 1px solid var(--border); border-radius: 9px; outline: none;
+    }
+    input:focus, select:focus { border-color: var(--accent); }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      background: var(--accent); color: #fff; border: none; padding: 10px 16px;
+      border-radius: 9px; font-weight: 600;
+    }
+    .btn:hover { background: var(--accent-2); }
+    .btn.block { width: 100%; margin-top: 20px; }
+    .btn.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    .btn.ghost:hover { background: var(--panel-2); }
+    .btn.sm { padding: 6px 10px; font-size: 12px; font-weight: 500; border-radius: 7px; }
+    .err { color: var(--red); font-size: 13px; margin-top: 14px; min-height: 18px; }
+
+    /* ---------- App ---------- */
+    #app { display: none; }
+    header.top {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 24px; border-bottom: 1px solid var(--border);
+      background: rgba(19,26,35,.6); backdrop-filter: blur(6px);
+      position: sticky; top: 0; z-index: 5;
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px; }
+    .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+    .stat .n { font-size: 26px; font-weight: 700; }
+    .stat .l { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 12px; }
+    .toolbar input { max-width: 280px; }
+
+    table { width: 100%; border-collapse: collapse; background: var(--panel);
+      border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    th { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--panel-2); }
+    .key { font-family: var(--mono); font-size: 13px; }
+    .muted { color: var(--muted); }
+    .domains span { display: inline-block; font-family: var(--mono); font-size: 12px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 1px 7px; margin: 1px 2px; }
+
+    .badge { display: inline-block; padding: 3px 9px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+    .badge.active { color: var(--green); background: rgba(46,194,126,.12); }
+    .badge.suspended { color: var(--amber); background: rgba(224,165,38,.12); }
+    .badge.revoked { color: var(--red); background: rgba(229,72,77,.12); }
+    .badge.expired { color: var(--muted); background: rgba(139,154,171,.12); }
+
+    .row-actions { display: flex; gap: 6px; align-items: center; }
+    .copy { background: transparent; border: 1px solid var(--border); color: var(--muted);
+      border-radius: 6px; padding: 2px 7px; font-size: 11px; }
+    .copy:hover { color: var(--text); border-color: var(--accent); }
+    .empty { text-align: center; color: var(--muted); padding: 40px; }
+
+    /* toast */
+    #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+      padding: 12px 18px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.4);
+      opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+
+    /* modal */
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; place-items: center; z-index: 20; }
+    .overlay.show { display: grid; }
+    .modal { width: 460px; max-width: 92vw; padding: 24px; }
+    .modal h2 { margin: 0 0 6px; font-size: 17px; }
+    .keybox { font-family: var(--mono); font-size: 18px; letter-spacing: 1px; text-align: center;
+      background: var(--bg); border: 1px dashed var(--accent); border-radius: 10px; padding: 16px; margin: 18px 0; user-select: all; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+    @media (max-width: 720px) {
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      table { font-size: 13px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- ===== Login ===== -->
+  <section id="login">
+    <div class="card login-box">
+      <div class="brand">
+        <span class="dot"></span>
+        <div><h1>ExchangeKit License</h1><small>Панель управления лицензиями</small></div>
+      </div>
+      <form id="loginForm">
+        <label for="username">Логин</label>
+        <input id="username" autocomplete="username" required />
+        <label for="password">Пароль</label>
+        <input id="password" type="password" autocomplete="current-password" required />
+        <button class="btn block" type="submit">Войти</button>
+        <div class="err" id="loginErr"></div>
+      </form>
+    </div>
+  </section>
+
+  <!-- ===== App ===== -->
+  <main id="app">
+    <header class="top">
+      <div class="brand" style="margin:0">
+        <span class="dot"></span>
+        <div><h1>ExchangeKit License</h1><small id="who">admin</small></div>
+      </div>
+      <div class="row-actions">
+        <button class="btn" id="genBtn">+ Сгенерировать ключ</button>
+        <button class="btn ghost sm" id="logoutBtn">Выйти</button>
+      </div>
+    </header>
+
+    <div class="wrap">
+      <div class="stats" id="stats"></div>
+      <div class="toolbar">
+        <input id="search" placeholder="Поиск по ключу, e-mail или домену…" />
+        <button class="btn ghost sm" id="refreshBtn">Обновить</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Ключ</th><th>Статус</th><th>E-mail</th><th>Домены</th>
+            <th>Создана</th><th>Проверок</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- ===== Modal: new key ===== -->
+  <div class="overlay" id="modal">
+    <div class="card modal">
+      <h2>Лицензия создана</h2>
+      <p class="muted">Professional · бессрочно · 1 домен. Передайте ключ клиенту — почта и домен привяжутся при активации.</p>
+      <div class="keybox" id="newKey"></div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="copyKeyBtn">Скопировать</button>
+        <button class="btn" id="closeModalBtn">Готово</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script>
+    const TOKEN_KEY = 'ek_admin_token';
+    let licenses = [];
+
+    const $ = (s) => document.querySelector(s);
+    const token = () => localStorage.getItem(TOKEN_KEY);
+
+    function toast(msg) {
+      const t = $('#toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      clearTimeout(toast._t);
+      toast._t = setTimeout(() => t.classList.remove('show'), 2200);
+    }
+
+    async function api(path, opts = {}) {
+      const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+      if (token()) headers['Authorization'] = 'Bearer ' + token();
+      const res = await fetch(path, { ...opts, headers });
+      if (res.status === 401) { logout(); throw new Error('Сессия истекла, войдите снова'); }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || 'Ошибка запроса');
+      return data;
+    }
+
+    function fmtDate(ms) {
+      if (!ms) return '—';
+      return new Date(ms).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    async function copy(text) {
+      try { await navigator.clipboard.writeText(text); toast('Скопировано'); }
+      catch { toast('Не удалось скопировать'); }
+    }
+
+    // ---------- Auth ----------
+    $('#loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      $('#loginErr').textContent = '';
+      try {
+        const data = await api('/api/admin/login', {
+          method: 'POST',
+          body: JSON.stringify({ username: $('#username').value, password: $('#password').value }),
+        });
+        localStorage.setItem(TOKEN_KEY, data.token);
+        $('#who').textContent = data.username;
+        showApp();
+      } catch (err) {
+        $('#loginErr').textContent = err.message;
+      }
+    });
+
+    function logout() {
+      localStorage.removeItem(TOKEN_KEY);
+      $('#app').style.display = 'none';
+      $('#login').style.display = 'grid';
+      $('#password').value = '';
+    }
+    $('#logoutBtn').addEventListener('click', logout);
+
+    async function showApp() {
+      $('#login').style.display = 'none';
+      $('#app').style.display = 'block';
+      await load();
+    }
+
+    // ---------- Data ----------
+    async function load() {
+      try {
+        const data = await api('/api/admin/licenses');
+        licenses = data.licenses || [];
+        renderStats();
+        render();
+      } catch (err) { toast(err.message); }
+    }
+    $('#refreshBtn').addEventListener('click', load);
+
+    function renderStats() {
+      const by = (s) => licenses.filter(l => l.status === s).length;
+      const stats = [
+        ['Всего', licenses.length],
+        ['Активные', by('active')],
+        ['Приостановлены', by('suspended')],
+        ['Отозваны', by('revoked')],
+      ];
+      $('#stats').innerHTML = stats.map(([l, n]) =>
+        `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
+    }
+
+    function render() {
+      const q = $('#search').value.trim().toLowerCase();
+      const list = licenses.filter(l => {
+        if (!q) return true;
+        const hay = [l.licenseKey, l.customerEmail || '', ...(l.boundDomains || []).map(d => d.domain)].join(' ').toLowerCase();
+        return hay.includes(q);
+      });
+
+      if (!list.length) {
+        $('#rows').innerHTML = `<tr><td colspan="7" class="empty">Лицензий пока нет. Нажмите «Сгенерировать ключ».</td></tr>`;
+        return;
+      }
+
+      $('#rows').innerHTML = list.map(l => {
+        const domains = (l.boundDomains || []).length
+          ? `<div class="domains">${l.boundDomains.map(d => `<span>${d.domain}</span>`).join('')}</div>`
+          : '<span class="muted">не привязан</span>';
+        return `<tr>
+          <td><span class="key">${l.licenseKey}</span>
+            <button class="copy" data-copy="${l.licenseKey}">copy</button></td>
+          <td><span class="badge ${l.status}">${l.status}</span></td>
+          <td>${l.customerEmail ? l.customerEmail : '<span class="muted">—</span>'}</td>
+          <td>${domains}</td>
+          <td class="muted">${fmtDate(l.issuedAt)}</td>
+          <td class="muted">${l.validationCount || 0}</td>
+          <td>
+            <select data-id="${l.id}" class="statusSel">
+              <option value="active" ${l.status==='active'?'selected':''}>Активна</option>
+              <option value="suspended" ${l.status==='suspended'?'selected':''}>Приостановить</option>
+              <option value="revoked" ${l.status==='revoked'?'selected':''}>Отозвать</option>
+            </select>
+          </td>
+        </tr>`;
+      }).join('');
+
+      document.querySelectorAll('[data-copy]').forEach(b =>
+        b.addEventListener('click', () => copy(b.dataset.copy)));
+      document.querySelectorAll('.statusSel').forEach(sel =>
+        sel.addEventListener('change', () => changeStatus(sel.dataset.id, sel.value)));
+    }
+    $('#search').addEventListener('input', render);
+
+    async function changeStatus(id, status) {
+      try {
+        await api(`/api/admin/licenses/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
+        toast('Статус обновлён');
+        await load();
+      } catch (err) { toast(err.message); await load(); }
+    }
+
+    // ---------- Generate ----------
+    $('#genBtn').addEventListener('click', async () => {
+      try {
+        const data = await api('/api/admin/licenses', { method: 'POST', body: JSON.stringify({}) });
+        $('#newKey').textContent = data.license.licenseKey;
+        $('#modal').classList.add('show');
+        await load();
+      } catch (err) { toast(err.message); }
+    });
+    $('#copyKeyBtn').addEventListener('click', () => copy($('#newKey').textContent));
+    $('#closeModalBtn').addEventListener('click', () => $('#modal').classList.remove('show'));
+    $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') $('#modal').classList.remove('show'); });
+
+    // ---------- Boot ----------
+    if (token()) showApp().catch(logout);
+  </script>
+</body>
+</html>

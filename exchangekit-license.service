@@ -1,0 +1,33 @@
+# systemd-юнит лицензионного сервера ExchangeKit.
+#
+# Установка (на ВАШЕМ сервере, не у клиента):
+#   sudo useradd --system --create-home --shell /usr/sbin/nologin license
+#   sudo mkdir -p /opt/license-server/releases
+#   sudo rsync -a LICENSE/ /opt/license-server/   # без node_modules
+#   cd /opt/license-server && sudo -u license npm ci --omit=dev
+#   sudo -u license cp .env.example .env          # затем заполнить секреты
+#   sudo cp exchangekit-license.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now exchangekit-license
+#
+# Проверка: curl http://127.0.0.1:3001/api/health
+# Рекомендуется поставить за nginx с HTTPS (как основное приложение).
+
+[Unit]
+Description=ExchangeKit License Server
+After=network.target
+
+[Service]
+Type=simple
+User=license
+WorkingDirectory=/opt/license-server
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node server.mjs
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=exchangekit-license
+
+[Install]
+WantedBy=multi-user.target
