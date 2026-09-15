@@ -568,6 +568,28 @@ app.patch('/api/admin/licenses/:id/status', authenticateAdmin, async (req, res) 
   });
 });
 
+// Удалить можно только отозванный ключ: действующий клиент не должен
+// потерять лицензию одним кликом. Привязки доменов удаляются вместе с ключом,
+// журналы проверок и скачиваний остаются как история.
+app.delete('/api/admin/licenses/:id', authenticateAdmin, async (req, res) => {
+  const license = database.licenses.find(l => l.id === parseInt(req.params.id, 10));
+  if (!license) {
+    return res.status(404).json({ success: false, error: 'NOT_FOUND', message: 'License not found' });
+  }
+  if (license.status !== 'revoked') {
+    return res.status(409).json({
+      success: false,
+      error: 'LICENSE_NOT_REVOKED',
+      message: 'Only revoked licenses can be deleted',
+    });
+  }
+
+  database.licenses = database.licenses.filter(l => l !== license);
+  database.domainBindings = database.domainBindings.filter(b => b.licenseId !== license.id);
+  await saveDatabase();
+  res.json({ success: true, message: 'License deleted' });
+});
+
 // ---- Клиентские эндпоинты ----
 
 app.post('/api/license/activate', async (req, res) => {

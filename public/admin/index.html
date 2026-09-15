@@ -470,13 +470,14 @@
           <td>${domains}</td>
           <td class="muted">${fmtDate(l.issuedAt)}</td>
           <td class="muted">${l.validationCount || 0}</td>
-          <td>
+          <td><div class="row-actions">
             <select data-id="${l.id}" class="statusSel">
               <option value="active" ${l.status==='active'?'selected':''}>Активна</option>
               <option value="suspended" ${l.status==='suspended'?'selected':''}>Приостановить</option>
               <option value="revoked" ${l.status==='revoked'?'selected':''}>Отозвать</option>
             </select>
-          </td>
+            <button class="btn ghost sm danger" data-delete-license="${l.id}" ${l.status === 'revoked' ? '' : 'disabled title="Сначала отзовите ключ"'}>Удалить</button>
+          </div></td>
         </tr>`;
       }).join('');
 
@@ -484,6 +485,8 @@
         b.addEventListener('click', () => copy(b.dataset.copy)));
       document.querySelectorAll('.statusSel').forEach(sel =>
         sel.addEventListener('change', () => changeStatus(sel.dataset.id, sel.value)));
+      document.querySelectorAll('[data-delete-license]').forEach(b =>
+        b.addEventListener('click', () => deleteLicense(Number(b.dataset.deleteLicense))));
     }
     $('#search').addEventListener('input', render);
     $('#productFilter').addEventListener('change', () => {
@@ -497,6 +500,16 @@
         toast('Статус обновлён');
         await load();
       } catch (err) { toast(err.message); await load(); }
+    }
+
+    async function deleteLicense(id) {
+      const license = licenses.find(l => l.id === id);
+      if (!license || !confirm(`Удалить ключ ${license.licenseKey}? Это действие нельзя отменить.`)) return;
+      try {
+        await api(`/api/admin/licenses/${id}`, { method: 'DELETE' });
+        toast('Ключ удалён');
+        await load();
+      } catch (err) { toast(err.message); }
     }
 
     // ---------- Generate key ----------

@@ -209,6 +209,7 @@ RELEASE_SSH_TARGET=license@HOST:/opt/license-server/releases/<productId> \
 | GET  | `/api/admin/licenses` | список лицензий, необязательный `?productId=` |
 | POST | `/api/admin/licenses` | создать лицензию: `{ "productId": "market" }` |
 | PATCH | `/api/admin/licenses/:id/status` | сменить статус: `active`/`suspended`/`revoked` |
+| DELETE | `/api/admin/licenses/:id` | удалить отозванную лицензию (вместе с привязками доменов) |
 | POST | `/api/license/activate` | активация + привязка домена, выдаёт JWT |
 | POST | `/api/license/validate` | проверка лицензии и домена |
 | POST | `/api/license/heartbeat` | продление «живости» (Bearer-токен) |
