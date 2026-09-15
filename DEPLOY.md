@@ -1,12 +1,14 @@
 # Быстрое развёртывание лицензионного сервера (systemd)
 
-Разворачивается на **вашем** сервере. Полная документация — [README.md](./README.md).
+Разворачивается на **вашем** сервере; один сервер обслуживает все продукты из
+`products.json`. Полная документация — [README.md](./README.md).
 
 ## Автоматическая установка на домен (рекомендуется)
 
 Один скрипт ставит Node.js, nginx, certbot, создаёт пользователя `license`,
-копирует сервер в `/opt/license-server`, генерирует `.env` с секретами, поднимает
-systemd-сервис и nginx reverse-proxy на ваш домен с HTTPS.
+копирует сервер в `/opt/license-server`, генерирует `.env` с секретами, создаёт
+каталоги релизов `releases/<productId>/`, поднимает systemd-сервис
+`license-server` и nginx reverse-proxy на ваш домен с HTTPS.
 
 ```bash
 # на VPS, из каталога с файлами этого репозитория
@@ -23,7 +25,9 @@ sudo DOMAIN=license.example.com ENABLE_SSL=y LE_EMAIL=you@example.com \
 ```
 
 После установки веб-админка доступна на `https://<домен>/admin`. Повторный запуск
-безопасен — `.env` и `license-database.json` не перезаписываются.
+безопасен — `.env` и `license-database.json` не перезаписываются. Так же
+разворачиваются изменения `products.json`: повторный запуск копирует справочник,
+создаёт каталоги релизов новых продуктов и перезапускает сервис.
 
 ## Ручная установка за несколько минут
 
@@ -32,9 +36,9 @@ sudo DOMAIN=license.example.com ENABLE_SSL=y LE_EMAIL=you@example.com \
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
-# 2. Пользователь и каталоги
+# 2. Пользователь и каталоги (подпапка релизов на каждый продукт)
 sudo useradd --system --create-home --shell /usr/sbin/nologin license
-sudo mkdir -p /opt/license-server/releases
+sudo mkdir -p /opt/license-server/releases/{exchangekit,blackbit}
 
 # 3. Файлы сервера (из этого репозитория, без node_modules)
 sudo rsync -a --exclude node_modules ./ /opt/license-server/
@@ -49,9 +53,9 @@ sudo -u license nano .env     # секреты + RELEASES_DIR
 #   RELEASES_DIR=/opt/license-server/releases
 
 # 5. systemd-сервис
-sudo cp exchangekit-license.service /etc/systemd/system/
+sudo cp license-server.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now exchangekit-license
+sudo systemctl enable --now license-server
 
 # 6. Проверка
 curl http://127.0.0.1:3001/api/health
@@ -64,35 +68,40 @@ curl http://127.0.0.1:3001/api/health
 ```bash
 curl -X POST http://127.0.0.1:3001/api/admin/licenses \
   -H "Content-Type: application/json" \
-  -H "X-Admin-Password: <ADMIN_PASSWORD>"
+  -H "X-Admin-Password: <ADMIN_PASSWORD>" \
+  -d '{"productId":"exchangekit"}'
 ```
 
-Генерируется только ключ — почта и домен не указываются. Клиент привязывает их
-сам при установке (вводит e-mail и домен). Сохраните `licenseKey` из ответа —
-его получает клиент после оплаты.
+`productId` обязателен. Функции, лимиты и срок берутся из `products.json`.
+Почта и домен не указываются — клиент привязывает их сам при установке.
+Сохраните `licenseKey` из ответа — его получает клиент после оплаты.
 
 ## Публикация релиза
 
-```bash
-# один раз: ключи подписи (публичный — в install.sh/update.sh)
-INSTALL/release.sh keygen
+У каждого продукта своя пара ключей подписи (только на машине сборки) и своя
+подпапка релизов на сервере.
 
-# собрать и залить релиз
-RELEASE_SSH_TARGET=license@HOST:/opt/license-server/releases \
+```bash
+RELEASE_SSH_TARGET=license@HOST:/opt/license-server/releases/<productId> \
   INSTALL/release.sh 1.0.0 stable
 ```
 
 ## Полезные команды
 
 ```bash
-journalctl -u exchangekit-license -f          # логи
-systemctl restart exchangekit-license          # рестарт
-systemctl status exchangekit-license           # статус
+journalctl -u license-server -f          # логи
+systemctl restart license-server         # рестарт (нужен после правки products.json)
+systemctl status license-server          # статус
 ```
 
 ## Проблемы?
 
-1. **Порт занят** — измените `LICENSE_SERVER_PORT` в `.env`.
-2. **Нет доступа** — `sudo ufw status`, проверьте проксирование nginx.
-3. **Ошибки** — `journalctl -u exchangekit-license -n 50`.
-4. **Релиз не отдаётся** — проверьте `RELEASES_DIR` и наличие `releases.json`.
+1. **Сервис не стартует** — `journalctl -u license-server -n 50`. Частые причины:
+   ошибка в `products.json` (например, совпали префиксы ключей) или повреждённый
+   `license-database.json`.
+2. **Порт занят** — смените `LICENSE_SERVER_PORT` в `.env`.
+3. **Нет доступа** — `sudo ufw status`, проверьте проксирование nginx.
+4. **Релиз не отдаётся** — проверьте `releases/<productId>/releases.json` и что
+   клиент передаёт верный `productId`.
+5. **`PRODUCT_REQUIRED` / `PRODUCT_MISMATCH`** — клиент не передал `productId`
+   или ключ выпущен для другого продукта.

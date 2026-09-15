@@ -1,7 +1,7 @@
 {
-  "name": "exchangekit-license-server",
-  "version": "2.0.0",
-  "description": "License validation server for ExchangeKit",
+  "name": "license-server",
+  "version": "3.0.0",
+  "description": "Multi-product license validation and release distribution server",
   "type": "module",
   "main": "server.mjs",
   "scripts": {

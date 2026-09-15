@@ -1,19 +1,18 @@
 #!/usr/bin/env bash
 
 #############################################################################
-# ExchangeKit License Server — установка на домен (VPS)
-# Версия: 1.0.0
+# License Server — установка на домен (VPS). Один сервер на все продукты.
+# Версия: 2.0.0
 # Цель:   Ubuntu 22.04 / 24.04 LTS
 #
 # Что разворачивается:
 #   - Node.js 20 LTS, nginx, certbot, ufw
-#   - Лицензионный сервер (server.mjs) как systemd-сервис exchangekit-license
+#   - Лицензионный сервер (server.mjs) как systemd-сервис license-server
 #   - nginx reverse-proxy домен → 127.0.0.1:PORT (веб-админка /admin + /api)
 #   - HTTPS через Let's Encrypt (опционально)
+#   - Подпапки релизов releases/<productId>/ для продуктов из products.json
 #
-# Запуск (из корня репозитория, где лежит папка LICENSE):
-#   sudo bash LICENSE/install-license-server.sh
-# или из самой папки:
+# Запуск (из папки репозитория):
 #   sudo bash install-license-server.sh
 #
 # Скрипт копирует исходники сервера из своей папки в /opt/license-server.
@@ -29,7 +28,7 @@ SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="/opt/license-server"
 RELEASES_DIR="${APP_DIR}/releases"
 SERVICE_USER="license"
-SERVICE_NAME="exchangekit-license"
+SERVICE_NAME="license-server"
 NODE_MAJOR=20
 
 INSTALL_LOG="${SOURCE_DIR}/install-license-server.log"
@@ -142,6 +141,15 @@ deploy_files() {
     "${SOURCE_DIR}/" "${APP_DIR}/"
   ok "Файлы сервера скопированы в ${APP_DIR}"
 
+  # Подпапка релизов на каждый продукт справочника
+  local product_ids pid
+  product_ids="$(node -e 'for (const p of require(process.argv[1]).products) console.log(p.id)' "${APP_DIR}/products.json")" \
+    || die "Не удалось прочитать ${APP_DIR}/products.json"
+  for pid in $product_ids; do
+    mkdir -p "${RELEASES_DIR}/${pid}"
+  done
+  ok "Каталоги релизов: $(echo $product_ids | sed "s|\([^ ]*\)|releases/\1/|g")"
+
   chown -R "${SERVICE_USER}:${SERVICE_USER}" "$APP_DIR"
 }
 
@@ -174,7 +182,7 @@ write_env() {
   fi
 
   cat > "$env_file" <<EOF
-# Конфигурация лицензионного сервера ExchangeKit (создано установщиком)
+# Конфигурация лицензионного сервера (создано установщиком)
 LICENSE_SERVER_PORT=${LICENSE_SERVER_PORT}
 LICENSE_JWT_SECRET=${LICENSE_JWT_SECRET}
 ADMIN_USERNAME=${ADMIN_USERNAME}
@@ -193,7 +201,7 @@ setup_service() {
   phase "Шаг 6/8 — systemd-сервис"
   cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
-Description=ExchangeKit License Server
+Description=License Server
 After=network.target
 
 [Service]
@@ -305,10 +313,12 @@ summary() {
   echo
   echo -e "  Создать лицензию из консоли:"
   echo -e "    ${CYAN}curl -X POST ${scheme}://${DOMAIN}/api/admin/licenses \\${NC}"
-  echo -e "    ${CYAN}  -H 'X-Admin-Password: ${ADMIN_PASSWORD}'${NC}"
+  echo -e "    ${CYAN}  -H 'Content-Type: application/json' \\${NC}"
+  echo -e "    ${CYAN}  -H 'X-Admin-Password: ${ADMIN_PASSWORD}' \\${NC}"
+  echo -e "    ${CYAN}  -d '{\"productId\":\"<productId>\"}'${NC}"
   echo
   echo -e "  Управление: ${CYAN}systemctl status ${SERVICE_NAME}${NC} · ${CYAN}journalctl -u ${SERVICE_NAME} -f${NC}"
-  echo -e "  Каталог релизов: ${RELEASES_DIR}"
+  echo -e "  Каталог релизов: ${RELEASES_DIR}/<productId>/"
   [[ "$ENABLE_SSL" == y* ]] || echo -e "  ${YELLOW}HTTPS не включён. Рекомендуется: certbot --nginx -d ${DOMAIN}${NC}"
   echo
   warn "Сохраните пароль администратора — он также записан в ${APP_DIR}/.env"

@@ -1,0 +1,29 @@
+{
+  "products": [
+    {
+      "id": "exchangekit",
+      "name": "ExchangeKit",
+      "keyPrefix": "EK-",
+      "licenseType": "professional",
+      "maxDomains": 1,
+      "canChangeDomain": true,
+      "durationDays": null,
+      "features": {
+        "crypto": true,
+        "telegram": true,
+        "kyc": true,
+        "customBranding": true,
+        "prioritySupport": true,
+        "api": true,
+        "multiCurrency": true,
+        "analytics": true
+      }
+    },
+    {
+      "id": "blackbit",
+      "name": "BlackBit",
+      "keyPrefix": "BB-",
+      "features": {}
+    }
+  ]
+}

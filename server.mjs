@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import fsSync from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -12,6 +13,7 @@ dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+const VERSION = '3.0.0';
 const app = express();
 const PORT = process.env.LICENSE_SERVER_PORT || 3001;
 const JWT_SECRET = process.env.LICENSE_JWT_SECRET || 'your-secret-key-change-in-production';
@@ -20,10 +22,12 @@ const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const DB_FILE = 'license-database.json';
 
-// Каталог с артефактами релизов и манифестом releases.json.
-// Файлы туда кладёт скрипт сборки release.sh (по scp), сервер их только раздаёт.
-const RELEASES_DIR = process.env.RELEASES_DIR || path.resolve('releases');
-const MANIFEST_FILE = path.join(RELEASES_DIR, 'releases.json');
+// Справочник продуктов: идентификатор, название, функции, лимиты, срок, префикс ключа.
+const PRODUCTS_FILE = process.env.PRODUCTS_FILE || path.join(__dirname, 'products.json');
+
+// Каталог релизов: releases/<productId>/ с артефактами и манифестом releases.json.
+// Файлы туда кладёт скрипт сборки продукта (по scp), сервер их только раздаёт.
+const RELEASES_DIR = path.resolve(process.env.RELEASES_DIR || 'releases');
 
 // Middleware
 app.use(cors());
@@ -31,6 +35,104 @@ app.use(express.json());
 
 // Веб-админка (одностраничное приложение без сборки) на /admin
 app.use('/admin', express.static(path.join(__dirname, 'public', 'admin')));
+
+// ============================================================================
+// Product Catalog
+// ============================================================================
+
+// Загрузить и проверить справочник. Ошибка в справочнике — фатальна: лучше
+// не стартовать, чем выдавать ключи с неверными лимитами.
+function loadProducts() {
+  let raw;
+  try {
+    raw = JSON.parse(fsSync.readFileSync(PRODUCTS_FILE, 'utf8'));
+  } catch (error) {
+    throw new Error(`Cannot read products catalog ${PRODUCTS_FILE}: ${error.message}`);
+  }
+
+  const list = Array.isArray(raw?.products) ? raw.products : null;
+  if (!list || !list.length) throw new Error(`${PRODUCTS_FILE}: "products" must be a non-empty array`);
+
+  const catalog = new Map();
+  const prefixes = new Map(); // keyPrefix → id продукта
+
+  for (const p of list) {
+    const where = `${PRODUCTS_FILE}: product "${p?.id}"`;
+    if (typeof p?.id !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(p.id)) {
+      throw new Error(`${where}: id must match ^[a-z0-9][a-z0-9-]*$`);
+    }
+    if (catalog.has(p.id)) throw new Error(`${where}: duplicate id`);
+    if (typeof p.name !== 'string' || !p.name.trim()) throw new Error(`${where}: name is required`);
+
+    // Префикс ключа необязателен: по умолчанию строится из id (market → MARKET-).
+    const keyPrefix = p.keyPrefix ?? `${p.id.replace(/-/g, '').toUpperCase()}-`;
+    if (typeof keyPrefix !== 'string' || !/^[A-Z0-9]+-$/.test(keyPrefix)) {
+      throw new Error(`${where}: keyPrefix must look like "MK-"`);
+    }
+    if (prefixes.has(keyPrefix)) {
+      throw new Error(`${where}: keyPrefix ${keyPrefix} is already used by product "${prefixes.get(keyPrefix)}"`);
+    }
+
+    const maxDomains = p.maxDomains ?? 1;
+    if (!Number.isInteger(maxDomains) || maxDomains < 1) {
+      throw new Error(`${where}: maxDomains must be an integer >= 1`);
+    }
+    if (p.durationDays != null && (!Number.isInteger(p.durationDays) || p.durationDays < 1)) {
+      throw new Error(`${where}: durationDays must be null (perpetual) or an integer >= 1`);
+    }
+    const features = p.features ?? {};
+    if (typeof features !== 'object' || Array.isArray(features)) {
+      throw new Error(`${where}: features must be an object`);
+    }
+    if (p.canChangeDomain != null && typeof p.canChangeDomain !== 'boolean') {
+      throw new Error(`${where}: canChangeDomain must be boolean`);
+    }
+
+    prefixes.set(keyPrefix, p.id);
+    catalog.set(p.id, {
+      id: p.id,
+      name: p.name.trim(),
+      keyPrefix,
+      licenseType: p.licenseType || 'professional',
+      maxDomains,
+      canChangeDomain: p.canChangeDomain ?? true,
+      durationDays: p.durationDays ?? null,
+      features,
+    });
+  }
+
+  return catalog;
+}
+
+let products;
+try {
+  products = loadProducts();
+} catch (error) {
+  console.error(`❌ ${error.message}`);
+  process.exit(1);
+}
+
+function normalizeProductId(raw) {
+  return raw == null ? '' : String(raw).trim().toLowerCase();
+}
+
+// Продукт, от имени которого обращается программа (клиент или админка).
+// Возвращает { ok, productId } либо { ok:false, code, error, message }.
+function resolveProduct(raw) {
+  const productId = normalizeProductId(raw);
+  if (!productId) {
+    return { ok: false, code: 400, error: 'PRODUCT_REQUIRED', message: 'productId is required' };
+  }
+  if (!products.has(productId)) {
+    return { ok: false, code: 400, error: 'UNKNOWN_PRODUCT', message: `Unknown product "${productId}"` };
+  }
+  return { ok: true, productId };
+}
+
+const productMismatch = (productId) => ({
+  error: 'PRODUCT_MISMATCH',
+  message: `License key is not valid for product "${productId}"`,
+});
 
 // ============================================================================
 // Database Functions (JSON-based)
@@ -60,7 +162,9 @@ async function loadDatabase() {
       console.log('ℹ️  Creating new database file');
       await saveDatabase();
     } else {
-      console.error('Error loading database:', error);
+      // Не продолжаем с пустой базой: первая же запись затёрла бы файл.
+      console.error('❌ Error loading database:', error);
+      process.exit(1);
     }
   }
 }
@@ -77,20 +181,32 @@ async function saveDatabase() {
 // Initialize database
 await loadDatabase();
 
+// Лицензии продукта, удалённого из справочника, перестают проходить проверки.
+const orphaned = [...new Set(database.licenses.map(l => l.productId).filter(id => !products.has(id)))];
+if (orphaned.length) {
+  console.warn(`⚠️  Licenses reference products missing from catalog: ${orphaned.join(', ')}`);
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
 
-function generateLicenseKey() {
-  const segments = [];
-  for (let i = 0; i < 4; i++) {
-    segments.push(crypto.randomBytes(2).toString('hex').toUpperCase());
-  }
-  return `LIC-${segments.join('-')}`;
+function generateLicenseKey(prefix) {
+  let key;
+  do {
+    const segments = [];
+    for (let i = 0; i < 4; i++) {
+      segments.push(crypto.randomBytes(2).toString('hex').toUpperCase());
+    }
+    key = `${prefix}${segments.join('-')}`;
+  } while (getLicenseByKey(key));
+  return key;
 }
 
-function generateToken(licenseKey, customerId) {
-  return jwt.sign({ licenseKey, customerId }, JWT_SECRET, { expiresIn: '30d' });
+// Продукт зашит в токен: heartbeat, status и unbind-domain сверяют его
+// с productId лицензии.
+function generateToken(licenseKey, customerId, productId) {
+  return jwt.sign({ licenseKey, customerId, productId }, JWT_SECRET, { expiresIn: '30d' });
 }
 
 function verifyToken(token) {
@@ -101,6 +217,18 @@ function verifyToken(token) {
   }
 }
 
+// Клиентский токен выдаётся при активации на одну лицензию: запрос по другому
+// ключу отклоняется до поиска лицензии, чтобы не раскрывать, существует ли ключ.
+// Возвращает тело ответа 403 либо null.
+function tokenLicenseMismatch(tokenPayload, licenseKey) {
+  if (tokenPayload.licenseKey === licenseKey) return null;
+  return { error: 'TOKEN_LICENSE_MISMATCH', message: 'Token was issued for another license' };
+}
+
+function tokenMatchesProduct(tokenPayload, license) {
+  return tokenPayload.productId === license.productId;
+}
+
 function getLicenseByKey(licenseKey) {
   return database.licenses.find(l => l.licenseKey === licenseKey);
 }
@@ -109,10 +237,11 @@ function getDomainBindings(licenseId) {
   return database.domainBindings.filter(b => b.licenseId === licenseId && b.isActive);
 }
 
-function logValidation(licenseId, domain, success, ipAddress, userAgent, errorMessage = null) {
+function logValidation(licenseId, productId, domain, success, ipAddress, userAgent, errorMessage = null) {
   database.validationLogs.push({
     id: database.nextId.log++,
     licenseId,
+    productId,
     domain,
     success,
     ipAddress,
@@ -140,27 +269,37 @@ function isDomainMatch(bindings, domain) {
 // Release Distribution
 // ============================================================================
 
-// Прочитать манифест релизов releases.json. Формат:
+// Каталог релизов продукта — releases/<productId>/. productId здесь всегда
+// из справочника (проверен regex'ом), поэтому выйти за RELEASES_DIR нельзя.
+function productReleasesDir(productId) {
+  return path.join(RELEASES_DIR, productId);
+}
+
+// Прочитать манифест релизов releases.json из каталога продукта. Формат:
 // { "stable": { version, file, sha256, signature, size, publishedAt }, ... }
-async function readManifest() {
+async function readManifest(dir) {
   try {
-    const raw = await fs.readFile(MANIFEST_FILE, 'utf8');
+    const raw = await fs.readFile(path.join(dir, 'releases.json'), 'utf8');
     return JSON.parse(raw);
   } catch (error) {
-    if (error.code !== 'ENOENT') console.error('Error reading releases manifest:', error);
+    if (error.code !== 'ENOENT') console.error(`Error reading releases manifest in ${dir}:`, error);
     return {};
   }
 }
 
-// Единая проверка лицензии для выдачи релиза: активна, не истекла, домен привязан.
+// Единая проверка лицензии для выдачи релиза: продукт совпадает, активна,
+// не истекла, домен привязан.
 // Возвращает { ok, license } либо { ok:false, code, error, message }.
-function checkLicenseForRelease(licenseKey, domain) {
+function checkLicenseForRelease(licenseKey, domain, productId) {
   if (!licenseKey || !domain) {
     return { ok: false, code: 400, error: 'INVALID_REQUEST', message: 'License key and domain are required' };
   }
   const license = getLicenseByKey(licenseKey);
   if (!license) {
     return { ok: false, code: 404, error: 'INVALID_KEY', message: 'License key not found' };
+  }
+  if (license.productId !== productId) {
+    return { ok: false, code: 403, ...productMismatch(productId) };
   }
   if (license.status === 'suspended' || license.status === 'revoked') {
     return { ok: false, code: 403, error: license.status.toUpperCase(), message: `License is ${license.status}` };
@@ -183,7 +322,7 @@ function checkLicenseForRelease(licenseKey, domain) {
 
 function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
-  
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Unauthorized', message: 'Missing or invalid token' });
   }
@@ -191,7 +330,9 @@ function authenticate(req, res, next) {
   const token = authHeader.substring(7);
   const decoded = verifyToken(token);
 
-  if (!decoded) {
+  // Клиентский токен выдаётся при активации и всегда содержит продукт;
+  // admin-токен сюда не подходит.
+  if (!decoded || !decoded.productId) {
     return res.status(401).json({ error: 'Unauthorized', message: 'Invalid or expired token' });
   }
 
@@ -241,7 +382,8 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: Date.now(),
-    version: '2.0.0',
+    version: VERSION,
+    products: [...products.keys()],
     totalLicenses: database.licenses.length,
     activeLicenses: database.licenses.filter(l => l.status === 'active').length
   });
@@ -275,12 +417,21 @@ app.post('/api/admin/login', (req, res) => {
   });
 });
 
-// Список всех лицензий с привязанными доменами (для веб-админки)
+// Справочник продуктов (для выбора продукта в веб-админке)
+app.get('/api/admin/products', authenticateAdmin, (req, res) => {
+  res.json({ success: true, products: [...products.values()] });
+});
+
+// Список лицензий с привязанными доменами (для веб-админки).
+// Необязательный ?productId= отбирает лицензии одного продукта.
 app.get('/api/admin/licenses', authenticateAdmin, (req, res) => {
-  const licenses = database.licenses.map(license => ({
-    ...license,
-    boundDomains: getDomainBindings(license.id),
-  }));
+  const { productId } = req.query;
+  const licenses = database.licenses
+    .filter(license => !productId || license.productId === productId)
+    .map(license => ({
+      ...license,
+      boundDomains: getDomainBindings(license.id),
+    }));
 
   res.json({
     success: true,
@@ -290,40 +441,31 @@ app.get('/api/admin/licenses', authenticateAdmin, (req, res) => {
 });
 
 app.post('/api/admin/licenses', authenticateAdmin, async (req, res) => {
-  // Все лицензии одного типа: Professional, бессрочно, на один домен.
-  // При генерации указывается ТОЛЬКО ключ — почта и домен не задаются.
-  // Привязка к почте и домену происходит при активации клиентом на его сервере.
-  const licenseType = 'professional';
-  const maxDomains = 1;
-  const canChangeDomain = true;
-
-  const features = {
-    crypto: true,
-    telegram: true,
-    kyc: true,
-    customBranding: true,
-    prioritySupport: true,
-    api: true,
-    multiCurrency: true,
-    analytics: true,
-  };
-
-  const licenseKey = generateLicenseKey();
-  const now = Date.now();
+  // Тип, функции, лимиты и срок берутся из справочника продуктов и копируются
+  // в лицензию: последующая правка справочника не меняет уже выданные ключи.
+  // Почта и домен не задаются — привязываются при активации клиентом.
+  const resolved = resolveProduct((req.body || {}).productId);
+  if (!resolved.ok) {
+    return res.status(resolved.code).json({ success: false, error: resolved.error, message: resolved.message });
+  }
+  const { productId } = resolved;
+  const product = products.get(productId);
 
   const license = {
     id: database.nextId.license++,
-    licenseKey,
-    licenseType,
+    licenseKey: generateLicenseKey(product.keyPrefix),
+    productId,
+    licenseType: product.licenseType,
     status: 'active',
     customerId: null,        // присваивается при активации
     customerEmail: null,     // привязывается при активации
-    issuedAt: now,
-    expiresAt: null,         // бессрочно
+    issuedAt: Date.now(),
+    expiresAt: null,         // при сроке — отсчитывается от первой активации
+    durationDays: product.durationDays,
     activatedAt: null,
-    maxDomains,
-    canChangeDomain,
-    features,
+    maxDomains: product.maxDomains,
+    canChangeDomain: product.canChangeDomain,
+    features: { ...product.features },
     validationCount: 0,
     lastValidated: null
   };
@@ -385,6 +527,12 @@ app.post('/api/license/activate', async (req, res) => {
     });
   }
 
+  const product = resolveProduct(req.body.productId);
+  if (!product.ok) {
+    return res.status(product.code).json({ success: false, error: product.error, message: product.message });
+  }
+  const { productId } = product;
+
   const license = getLicenseByKey(licenseKey);
 
   if (!license) {
@@ -395,18 +543,9 @@ app.post('/api/license/activate', async (req, res) => {
     });
   }
 
-  // Первая активация: привязываем e-mail, введённый клиентом, к лицензии.
-  // Повторные активации должны использовать тот же e-mail.
-  if (!license.customerEmail) {
-    license.customerEmail = customerEmail;
-    if (!license.customerId) license.customerId = crypto.randomBytes(8).toString('hex');
-    license.activatedAt = Date.now();
-  } else if (license.customerEmail.toLowerCase() !== customerEmail.toLowerCase()) {
-    return res.status(403).json({
-      success: false,
-      error: 'EMAIL_MISMATCH',
-      message: 'Email does not match the one used to activate this license',
-    });
+  if (license.productId !== productId) {
+    logValidation(license.id, productId, domain, false, req.ip, req.get('user-agent'), 'Product mismatch');
+    return res.status(403).json({ success: false, ...productMismatch(productId) });
   }
 
   if (license.status !== 'active') {
@@ -427,9 +566,18 @@ app.post('/api/license/activate', async (req, res) => {
     });
   }
 
+  // Повторные активации должны использовать тот же e-mail, что и первая.
+  if (license.customerEmail && license.customerEmail.toLowerCase() !== customerEmail.toLowerCase()) {
+    return res.status(403).json({
+      success: false,
+      error: 'EMAIL_MISMATCH',
+      message: 'Email does not match the one used to activate this license',
+    });
+  }
+
   const bindings = getDomainBindings(license.id);
   const existingBinding = bindings.find(b => b.domain === domain);
-  
+
   if (!existingBinding && bindings.length >= license.maxDomains) {
     return res.status(403).json({
       success: false,
@@ -439,6 +587,16 @@ app.post('/api/license/activate', async (req, res) => {
   }
 
   const now = Date.now();
+
+  // Первая активация: привязываем e-mail, введённый клиентом, и запускаем срок.
+  if (!license.customerEmail) {
+    license.customerEmail = customerEmail;
+    if (!license.customerId) license.customerId = crypto.randomBytes(8).toString('hex');
+    license.activatedAt = now;
+    if (license.durationDays && !license.expiresAt) {
+      license.expiresAt = now + license.durationDays * 24 * 60 * 60 * 1000;
+    }
+  }
 
   if (existingBinding) {
     existingBinding.protocol = protocol;
@@ -459,12 +617,12 @@ app.post('/api/license/activate', async (req, res) => {
 
   license.lastValidated = now;
   license.validationCount++;
-  
+
   await saveDatabase();
-  logValidation(license.id, domain, true, req.ip, req.get('user-agent'));
+  logValidation(license.id, productId, domain, true, req.ip, req.get('user-agent'));
 
   const updatedBindings = getDomainBindings(license.id);
-  const token = generateToken(licenseKey, license.customerId);
+  const token = generateToken(licenseKey, license.customerId, license.productId);
 
   res.json({
     success: true,
@@ -488,10 +646,16 @@ app.post('/api/license/validate', (req, res) => {
     });
   }
 
+  const product = resolveProduct(req.body.productId);
+  if (!product.ok) {
+    return res.status(product.code).json({ valid: false, error: product.error, message: product.message });
+  }
+  const { productId } = product;
+
   const license = getLicenseByKey(licenseKey);
 
   if (!license) {
-    logValidation(0, domain, false, req.ip, req.get('user-agent'), 'License not found');
+    logValidation(0, productId, domain, false, req.ip, req.get('user-agent'), 'License not found');
     return res.status(404).json({
       valid: false,
       error: 'INVALID_KEY',
@@ -499,11 +663,17 @@ app.post('/api/license/validate', (req, res) => {
     });
   }
 
+  if (license.productId !== productId) {
+    logValidation(license.id, productId, domain, false, req.ip, req.get('user-agent'), 'Product mismatch');
+    return res.status(403).json({ valid: false, ...productMismatch(productId) });
+  }
+
   if (license.status === 'suspended') {
-    logValidation(license.id, domain, false, req.ip, req.get('user-agent'), 'License suspended');
+    logValidation(license.id, productId, domain, false, req.ip, req.get('user-agent'), 'License suspended');
     return res.json({
       valid: false,
       licenseKey: license.licenseKey,
+      productId: license.productId,
       licenseType: license.licenseType,
       status: 'suspended',
       error: 'SUSPENDED',
@@ -512,10 +682,11 @@ app.post('/api/license/validate', (req, res) => {
   }
 
   if (license.status === 'revoked') {
-    logValidation(license.id, domain, false, req.ip, req.get('user-agent'), 'License revoked');
+    logValidation(license.id, productId, domain, false, req.ip, req.get('user-agent'), 'License revoked');
     return res.json({
       valid: false,
       licenseKey: license.licenseKey,
+      productId: license.productId,
       licenseType: license.licenseType,
       status: 'revoked',
       error: 'REVOKED',
@@ -524,14 +695,15 @@ app.post('/api/license/validate', (req, res) => {
   }
 
   const now = Date.now();
-  
+
   if (license.expiresAt && license.expiresAt < now) {
     license.status = 'expired';
     saveDatabase();
-    logValidation(license.id, domain, false, req.ip, req.get('user-agent'), 'License expired');
+    logValidation(license.id, productId, domain, false, req.ip, req.get('user-agent'), 'License expired');
     return res.json({
       valid: false,
       licenseKey: license.licenseKey,
+      productId: license.productId,
       licenseType: license.licenseType,
       status: 'expired',
       expiresAt: license.expiresAt,
@@ -544,10 +716,11 @@ app.post('/api/license/validate', (req, res) => {
   const domainMatch = isDomainMatch(bindings, domain);
 
   if (!domainMatch) {
-    logValidation(license.id, domain, false, req.ip, req.get('user-agent'), 'Domain mismatch');
+    logValidation(license.id, productId, domain, false, req.ip, req.get('user-agent'), 'Domain mismatch');
     return res.json({
       valid: false,
       licenseKey: license.licenseKey,
+      productId: license.productId,
       licenseType: license.licenseType,
       status: license.status,
       domainMatch: false,
@@ -560,23 +733,24 @@ app.post('/api/license/validate', (req, res) => {
 
   license.lastValidated = now;
   license.validationCount++;
-  
+
   const binding = bindings.find(b => b.domain === domain);
   if (binding) {
     binding.lastValidated = now;
     binding.validationCount++;
   }
-  
-  saveDatabase();
-  logValidation(license.id, domain, true, req.ip, req.get('user-agent'));
 
-  const daysRemaining = license.expiresAt 
+  saveDatabase();
+  logValidation(license.id, productId, domain, true, req.ip, req.get('user-agent'));
+
+  const daysRemaining = license.expiresAt
     ? Math.ceil((license.expiresAt - now) / (24 * 60 * 60 * 1000))
     : null;
 
   res.json({
     valid: true,
     licenseKey: license.licenseKey,
+    productId: license.productId,
     licenseType: license.licenseType,
     status: 'active',
     expiresAt: license.expiresAt,
@@ -595,21 +769,30 @@ app.post('/api/license/unbind-domain', authenticate, async (req, res) => {
   const { licenseKey, domainId } = req.body;
 
   if (!licenseKey || !domainId) {
-    return res.status(400).json({ 
-      success: false, 
+    return res.status(400).json({
+      success: false,
       error: 'INVALID_REQUEST',
-      message: 'License key and domain ID are required' 
+      message: 'License key and domain ID are required'
     });
+  }
+
+  const tokenMismatch = tokenLicenseMismatch(req.user, licenseKey);
+  if (tokenMismatch) {
+    return res.status(403).json({ success: false, ...tokenMismatch });
   }
 
   const license = getLicenseByKey(licenseKey);
 
   if (!license) {
-    return res.status(404).json({ 
-      success: false, 
+    return res.status(404).json({
+      success: false,
       error: 'NOT_FOUND',
-      message: 'License not found' 
+      message: 'License not found'
     });
+  }
+
+  if (!tokenMatchesProduct(req.user, license)) {
+    return res.status(403).json({ success: false, ...productMismatch(req.user.productId) });
   }
 
   if (!license.canChangeDomain) {
@@ -621,7 +804,7 @@ app.post('/api/license/unbind-domain', authenticate, async (req, res) => {
   }
 
   const binding = database.domainBindings.find(b => b.id === parseInt(domainId) && b.licenseId === license.id);
-  
+
   if (binding) {
     binding.isActive = false;
     await saveDatabase();
@@ -636,6 +819,11 @@ app.post('/api/license/unbind-domain', authenticate, async (req, res) => {
 app.post('/api/license/heartbeat', authenticate, async (req, res) => {
   const { licenseKey, domain } = req.body;
 
+  const tokenMismatch = tokenLicenseMismatch(req.user, licenseKey);
+  if (tokenMismatch) {
+    return res.status(403).json({ acknowledged: false, ...tokenMismatch });
+  }
+
   const license = getLicenseByKey(licenseKey);
 
   if (!license) {
@@ -644,6 +832,10 @@ app.post('/api/license/heartbeat', authenticate, async (req, res) => {
       error: 'INVALID_KEY',
       message: 'License not found',
     });
+  }
+
+  if (!tokenMatchesProduct(req.user, license)) {
+    return res.status(403).json({ acknowledged: false, ...productMismatch(req.user.productId) });
   }
 
   const now = Date.now();
@@ -672,21 +864,31 @@ app.get('/api/license/status', authenticate, (req, res) => {
     return res.status(400).json({ error: 'INVALID_REQUEST', message: 'License key required' });
   }
 
+  const tokenMismatch = tokenLicenseMismatch(req.user, licenseKey);
+  if (tokenMismatch) {
+    return res.status(403).json(tokenMismatch);
+  }
+
   const license = getLicenseByKey(licenseKey);
 
   if (!license) {
     return res.status(404).json({ error: 'NOT_FOUND', message: 'License not found' });
   }
 
+  if (!tokenMatchesProduct(req.user, license)) {
+    return res.status(403).json(productMismatch(req.user.productId));
+  }
+
   const bindings = getDomainBindings(license.id);
   const now = Date.now();
-  const daysRemaining = license.expiresAt 
+  const daysRemaining = license.expiresAt
     ? Math.ceil((license.expiresAt - now) / (24 * 60 * 60 * 1000))
     : null;
 
   res.json({
     valid: license.status === 'active' && (!license.expiresAt || license.expiresAt > now),
     licenseKey: license.licenseKey,
+    productId: license.productId,
     licenseType: license.licenseType,
     status: license.status,
     expiresAt: license.expiresAt,
@@ -700,30 +902,39 @@ app.get('/api/license/status', authenticate, (req, res) => {
 });
 
 // ---- GET /api/release/latest ---- метаданные последнего релиза для лицензии
-// Параметры: licenseKey, domain, channel (по умолчанию stable).
+// Параметры: licenseKey, domain, productId (обязателен),
+// channel (по умолчанию stable).
 app.get('/api/release/latest', async (req, res) => {
   const { licenseKey, domain, channel = 'stable' } = req.query;
 
-  const check = checkLicenseForRelease(licenseKey, domain);
+  const product = resolveProduct(req.query.productId);
+  if (!product.ok) {
+    return res.status(product.code).json({ error: product.error, message: product.message });
+  }
+  const { productId } = product;
+
+  const check = checkLicenseForRelease(licenseKey, domain, productId);
   if (!check.ok) {
-    logValidation(0, domain || '', false, req.ip, req.get('user-agent'), `release/latest: ${check.error}`);
+    logValidation(0, productId, domain || '', false, req.ip, req.get('user-agent'), `release/latest: ${check.error}`);
     return res.status(check.code).json({ error: check.error, message: check.message });
   }
 
-  const manifest = await readManifest();
+  const manifest = await readManifest(productReleasesDir(productId));
   const rel = manifest[channel];
   if (!rel) {
     return res.status(404).json({ error: 'NO_RELEASE', message: `No release published for channel "${channel}"` });
   }
 
+  const query = new URLSearchParams({ licenseKey, domain, productId });
   res.json({
     version: rel.version,
+    productId,
     channel,
     sha256: rel.sha256,
     signature: rel.signature,
     size: rel.size,
     publishedAt: rel.publishedAt,
-    downloadUrl: `/api/release/download/${rel.version}?licenseKey=${encodeURIComponent(licenseKey)}&domain=${encodeURIComponent(domain)}`,
+    downloadUrl: `/api/release/download/${rel.version}?${query}`,
   });
 });
 
@@ -732,28 +943,33 @@ app.get('/api/release/download/:version', async (req, res) => {
   const { licenseKey, domain } = req.query;
   const { version } = req.params;
 
-  const check = checkLicenseForRelease(licenseKey, domain);
+  const product = resolveProduct(req.query.productId);
+  if (!product.ok) {
+    return res.status(product.code).json({ error: product.error, message: product.message });
+  }
+  const { productId } = product;
+
+  const check = checkLicenseForRelease(licenseKey, domain, productId);
   if (!check.ok) {
-    logValidation(0, domain || '', false, req.ip, req.get('user-agent'), `release/download: ${check.error}`);
+    logValidation(0, productId, domain || '', false, req.ip, req.get('user-agent'), `release/download: ${check.error}`);
     return res.status(check.code).json({ error: check.error, message: check.message });
   }
 
-  const manifest = await readManifest();
-  // Ищем релиз с такой версией в любом канале.
+  const dir = productReleasesDir(productId);
+  const manifest = await readManifest(dir);
+  // Ищем релиз с такой версией в любом канале — только среди релизов этого продукта.
   const rel = Object.values(manifest).find(r => r && r.version === version);
   if (!rel || !rel.file) {
     return res.status(404).json({ error: 'NO_RELEASE', message: `Release ${version} not found` });
   }
 
   // Защита от path traversal: используем только basename из манифеста.
-  const filePath = path.join(RELEASES_DIR, path.basename(rel.file));
+  const filePath = path.join(dir, path.basename(rel.file));
 
-  // Журнал скачиваний (поля могли отсутствовать в старой БД — инициализируем)
-  database.downloadLogs = database.downloadLogs || [];
-  database.nextId.download = database.nextId.download || 1;
   database.downloadLogs.push({
     id: database.nextId.download++,
     licenseId: check.license.id,
+    productId,
     version,
     domain,
     ipAddress: req.ip,
@@ -781,16 +997,20 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log('');
   console.log('════════════════════════════════════════════════════════');
-  console.log('  🔐 License Server v2.0.0');
+  console.log(`  🔐 License Server v${VERSION}`);
   console.log('════════════════════════════════════════════════════════');
   console.log('');
   console.log(`  ✅ Server running on port ${PORT}`);
   console.log(`  🌐 Health check: http://localhost:${PORT}/api/health`);
   console.log(`  💾 Database: ${DB_FILE}`);
-  console.log(`  📦 Releases:  ${RELEASES_DIR}`);
+  console.log(`  🗂  Products: ${PRODUCTS_FILE}`);
+  console.log(`  📦 Releases:  ${RELEASES_DIR}/<productId>/`);
   console.log('');
-  console.log('  License model:');
-  console.log('    • Professional — бессрочно, 1 домен (привязка при активации)');
+  console.log('  Products:');
+  for (const p of products.values()) {
+    const term = p.durationDays ? `${p.durationDays} дн.` : 'бессрочно';
+    console.log(`    • ${p.name} (${p.id}, ${p.keyPrefix}) — ${term}, доменов: ${p.maxDomains}`);
+  }
   console.log('');
   console.log('  Press Ctrl+C to stop');
   console.log('');
