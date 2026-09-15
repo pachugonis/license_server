@@ -10,7 +10,7 @@
 #   - Лицензионный сервер (server.mjs) как systemd-сервис license-server
 #   - nginx reverse-proxy домен → 127.0.0.1:PORT (веб-админка /admin + /api)
 #   - HTTPS через Let's Encrypt (опционально)
-#   - Подпапки релизов releases/<productId>/ для продуктов из products.json
+#   - Каталог релизов releases/ (подпапки продуктов создаёт сервер при подключении в админке)
 #
 # Запуск (из папки репозитория):
 #   sudo bash install-license-server.sh
@@ -140,15 +140,6 @@ deploy_files() {
     --exclude releases \
     "${SOURCE_DIR}/" "${APP_DIR}/"
   ok "Файлы сервера скопированы в ${APP_DIR}"
-
-  # Подпапка релизов на каждый продукт справочника
-  local product_ids pid
-  product_ids="$(node -e 'for (const p of require(process.argv[1]).products) console.log(p.id)' "${APP_DIR}/products.json")" \
-    || die "Не удалось прочитать ${APP_DIR}/products.json"
-  for pid in $product_ids; do
-    mkdir -p "${RELEASES_DIR}/${pid}"
-  done
-  ok "Каталоги релизов: $(echo $product_ids | sed "s|\([^ ]*\)|releases/\1/|g")"
 
   chown -R "${SERVICE_USER}:${SERVICE_USER}" "$APP_DIR"
 }

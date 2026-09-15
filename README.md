@@ -2,8 +2,8 @@
 
 Сервер лицензий для нескольких веб-приложений (продуктов): выдача ключей,
 валидация лицензий, привязка к домену и **раздача подписанных релизов**
-клиентским установкам. Один сервер обслуживает все продукты из справочника
-`products.json`. Разворачивается на **вашем** сервере (не у клиента).
+клиентским установкам. Один сервер обслуживает все продукты; продукты
+подключаются в веб-админке. Разворачивается на **вашем** сервере (не у клиента).
 Хранилище — JSON-файл `license-database.json`.
 
 Клиентский установщик продукта активирует лицензию на этом сервере и скачивает
@@ -13,9 +13,9 @@
 ## Содержание
 
 - [Быстрый старт](#быстрый-старт)
-- [Справочник продуктов](#справочник-продуктов)
-- [Подключение нового продукта](#подключение-нового-продукта)
+- [Модель лицензии](#модель-лицензии)
 - [Веб-админка](#веб-админка)
+- [Подключение нового продукта](#подключение-нового-продукта)
 - [Развёртывание на VPS (systemd)](#развёртывание-на-vps-systemd)
 - [Публикация релизов](#публикация-релизов)
 - [API](#api)
@@ -27,65 +27,64 @@
 npm install
 cp .env.example .env      # заполните секреты
 npm start                 # сервер на http://localhost:3001
-curl http://localhost:3001/api/health
+open http://localhost:3001/admin
 ```
 
-## Справочник продуктов
+## Модель лицензии
 
-Продукты описываются в [products.json](./products.json) (путь можно переопределить
-переменной `PRODUCTS_FILE`). Файл читается при старте; после правки —
-`systemctl restart license-server`. Ошибка в справочнике не даёт серверу запуститься.
-
-| Поле | Обязательно | По умолчанию | Значение |
-|------|:-:|------|----------|
-| `id` | ✅ | — | идентификатор: `a-z`, `0-9`, `-`. Его передаёт клиентская программа; менять после выдачи ключей нельзя |
-| `name` | ✅ | — | название для админки |
-| `features` | | `{}` | набор функций, отдаётся клиенту в `validate` и `status` |
-| `keyPrefix` | | `ID-` из `id` | префикс ключа: `market` → `MARKET-1A2B-3C4D-5E6F-7A8B`. Короткий задаётся вручную: `"MK-"` |
-| `maxDomains` | | `1` | сколько доменов можно привязать |
-| `durationDays` | | `null` | срок в днях от первой активации; `null` — бессрочно |
-| `canChangeDomain` | | `true` | разрешена ли отвязка домена |
-| `licenseType` | | `professional` | тип лицензии |
-
-Префиксы должны быть уникальны: если два продукта получают одинаковый префикс
-(заданный или построенный из `id`), сервер не стартует и называет оба продукта.
-
-Параметры продукта **копируются в лицензию при её создании**. Правка
-справочника действует только на новые ключи — уже выданные лицензии не меняются.
-
-## Подключение нового продукта
-
-1. Добавьте запись в `products.json` — минимально:
-   ```json
-   { "id": "market", "name": "Market", "keyPrefix": "MK-", "features": { "catalog": true } }
-   ```
-   и перезапустите сервис (`systemctl restart license-server`).
-2. Создайте каталог `releases/market/` (установщик при повторном запуске делает это сам).
-3. Сгенерируйте на машине сборки **отдельную** пару ключей подписи. Публичный
-   ключ вшейте в установщик и апдейтер продукта.
-4. В клиентской программе передавайте `productId: "market"` в `activate`,
-   `validate` и эндпоинтах релизов.
-5. Публикуйте релизы в `releases/market/`.
-
-После рестарта продукт появится в админке — ключи генерируются с выбором продукта.
+Одна для всех продуктов: **пожизненная, на 1 домен**. Домен можно сменить через
+отвязку (`/api/license/unbind-domain`). Почта и домен привязываются к ключу при
+первой активации (вводятся клиентом при установке); повторная активация требует
+тот же e-mail.
 
 ## Веб-админка
 
-Веб-интерфейс управления лицензиями доступен по адресу **`/admin`**
-(например, `http://localhost:3001/admin`). Вход по логину и паролю из `.env`
-(`ADMIN_USERNAME`, `ADMIN_PASSWORD`).
+Доступна по адресу **`/admin`** (например, `http://localhost:3001/admin`). Вход по
+логину и паролю из `.env` (`ADMIN_USERNAME`, `ADMIN_PASSWORD`).
 
-Возможности:
+**Вкладка «Лицензии»**
 
-- генерация ключа с выбором продукта (функции, лимиты и срок — из справочника);
-- список всех лицензий с колонкой «Продукт», фильтром по продукту и поиском по
+- генерация ключа с выбором продукта;
+- список лицензий с колонкой «Продукт», фильтром по продукту и поиском по
   ключу, e-mail и домену; статистика считается по выбранному продукту;
-- статусы (активна / приостановлена / отозвана) и их смена прямо из таблицы;
-- просмотр привязанных доменов и числа проверок.
+- статусы (активна / приостановлена / отозвана) и их смена прямо из таблицы.
+
+**Вкладка «Продукты»**
+
+- подключение нового продукта, изменение названия и набора функций;
+- удаление продукта, пока по нему не выпущено ни одного ключа.
 
 Интерфейс — статичная страница (`public/admin/index.html`), без сборки и
 дополнительных зависимостей. После входа выдаётся admin-токен (JWT, 12 ч),
 который хранится в браузере. В продакшене закрывайте `/admin` через HTTPS.
+
+## Подключение нового продукта
+
+В админке: **Продукты → + Подключить продукт**.
+
+| Поле | Значение |
+|------|----------|
+| Название | отображается в админке, например `Market` |
+| Идентификатор (`productId`) | латиница, цифры, дефис, до 32 символов, например `market`. Подставляется из названия |
+| Префикс ключа | необязателен: по умолчанию строится из идентификатора (`market` → `MARKET-`). Короткий задаётся вручную: `MK` → ключи `MK-1A2B-3C4D-5E6F-7A8B` |
+| Функции | через запятую: `api, telegram, analytics`. Клиент получает их в `validate` и `status` как `{ "api": true, ... }` |
+
+Префиксы уникальны: занятый префикс админка не даст сохранить.
+
+**Идентификатор и префикс после подключения не меняются.** Идентификатор хранится
+в лицензиях и токенах клиентов и задаёт каталог релизов. Название и функции можно
+менять в любой момент; новый набор функций сразу действует для всех ключей продукта.
+
+При подключении сервер создаёт каталог релизов `releases/<productId>/`. Дальше:
+
+1. Сгенерируйте на машине сборки **отдельную** пару ключей подписи для продукта.
+   Публичный ключ вшейте в установщик и апдейтер продукта.
+2. В клиентской программе передавайте `productId` в `activate`, `validate` и
+   эндпоинтах релизов.
+3. Публикуйте релизы в `releases/<productId>/`.
+
+Продукты хранятся в `license-database.json` (раздел `products`) и попадают в
+тот же бэкап, что и лицензии.
 
 ## Развёртывание на VPS (systemd)
 
@@ -102,9 +101,9 @@ sudo bash install-license-server.sh
 Подробности — [DEPLOY.md](./DEPLOY.md). Ниже — ручная установка по шагам.
 
 ```bash
-# 1. Пользователь и каталоги (подпапка релизов на каждый продукт)
+# 1. Пользователь и каталоги
 sudo useradd --system --create-home --shell /usr/sbin/nologin license
-sudo mkdir -p /opt/license-server/releases/{exchangekit,blackbit}
+sudo mkdir -p /opt/license-server/releases
 
 # 2. Файлы сервера (из этого репозитория, без node_modules)
 sudo rsync -a --exclude node_modules ./ /opt/license-server/
@@ -114,6 +113,7 @@ sudo -u license npm ci --omit=dev
 # 3. Конфигурация
 sudo -u license cp .env.example .env
 sudo -u license nano .env        # LICENSE_JWT_SECRET, ADMIN_PASSWORD, RELEASES_DIR
+sudo chown -R license:license /opt/license-server
 
 # 4. systemd-сервис
 sudo cp license-server.service /etc/systemd/system/
@@ -164,19 +164,19 @@ sudo ufw allow 'Nginx Full'
 
 ```
 releases/
-├── exchangekit/
+├── market/
 │   ├── releases.json
-│   └── exchangekit-1.0.0.tar.gz
-└── blackbit/
+│   └── market-1.0.0.tar.gz
+└── <productId>/
     ├── releases.json
-    └── blackbit-1.0.0.tar.gz
+    └── ...
 ```
 
 Формат `releases.json`:
 `{ "stable": { "version", "file", "sha256", "signature", "size", "publishedAt" }, ... }`.
 
 Манифест читается на каждый запрос — рестарт не нужен. Клиент получает релизы
-только своего продукта: ключ BlackBit не даст скачать сборку ExchangeKit.
+только своего продукта: ключ одного продукта не даст скачать сборку другого.
 
 ### Ключи подписи — отдельная пара на продукт
 
@@ -184,8 +184,7 @@ releases/
 продукта своя пара: утечка ключа одного продукта не позволит подписать сборку другого.
 
 ```
-release-keys/exchangekit/   # приватный + публичный ключ ExchangeKit
-release-keys/blackbit/      # приватный + публичный ключ BlackBit
+release-keys/<productId>/   # приватный + публичный ключ продукта
 ```
 
 Приватный ключ не коммитить и не передавать. Публичный ключ продукта вшивается
@@ -193,8 +192,8 @@ release-keys/blackbit/      # приватный + публичный ключ B
 
 ```bash
 # собрать релиз и залить в подпапку продукта
-RELEASE_SSH_TARGET=license@HOST:/opt/license-server/releases/exchangekit \
-  INSTALL/release.sh 1.0.0 stable
+RELEASE_SSH_TARGET=license@HOST:/opt/license-server/releases/<productId> \
+  ./release.sh 1.0.0 stable
 ```
 
 ## API
@@ -203,7 +202,10 @@ RELEASE_SSH_TARGET=license@HOST:/opt/license-server/releases/exchangekit \
 |-------|------|------------|
 | GET  | `/api/health` | статус, список продуктов, число лицензий |
 | POST | `/api/admin/login` | вход в веб-админку (`username`, `password`) → admin-токен |
-| GET  | `/api/admin/products` | справочник продуктов |
+| GET  | `/api/admin/products` | список продуктов |
+| POST | `/api/admin/products` | подключить продукт: `{ "id", "name", "keyPrefix"?, "features"? }` |
+| PATCH | `/api/admin/products/:id` | изменить `name` и/или `features` |
+| DELETE | `/api/admin/products/:id` | удалить продукт без лицензий |
 | GET  | `/api/admin/licenses` | список лицензий, необязательный `?productId=` |
 | POST | `/api/admin/licenses` | создать лицензию: `{ "productId": "market" }` |
 | PATCH | `/api/admin/licenses/:id/status` | сменить статус: `active`/`suspended`/`revoked` |
@@ -217,11 +219,15 @@ RELEASE_SSH_TARGET=license@HOST:/opt/license-server/releases/exchangekit \
 
 Admin-эндпоинты принимают admin-токен или заголовок `X-Admin-Password`.
 
-### Продукт в запросах
+`features` при подключении и изменении продукта — массив имён (`["api", "kyc"]`)
+или строка через запятую. Ошибки: `400 INVALID_PRODUCT`, `409 PRODUCT_EXISTS`,
+`409 PREFIX_IN_USE`, `409 PRODUCT_IN_USE` (удаление продукта с лицензиями).
+
+### Продукт в клиентских запросах
 
 `productId` **обязателен**:
 
-- `activate`, `validate`, `POST /api/admin/licenses` — поле `productId` в JSON-теле;
+- `activate`, `validate` — поле `productId` в JSON-теле;
 - `release/latest`, `release/download` — query-параметр `productId`;
 - `heartbeat`, `status`, `unbind-domain` — продукт берётся из JWT-токена,
   выданного при активации. Токен действует только для той лицензии, на которую
@@ -230,15 +236,23 @@ Admin-эндпоинты принимают admin-токен или заголо
 | Ситуация | Ответ |
 |----------|-------|
 | `productId` не передан | `400 PRODUCT_REQUIRED` |
-| `productId` нет в справочнике | `400 UNKNOWN_PRODUCT` |
+| `productId` не подключён | `400 UNKNOWN_PRODUCT` |
 | ключ принадлежит другому продукту (или токен выдан другому продукту) | `403 PRODUCT_MISMATCH` |
 | токен выдан на другой ключ (`heartbeat`, `status`, `unbind-domain`) | `403 TOKEN_LICENSE_MISMATCH` |
 
 Эндпоинты релизов проверяют лицензию так же, как `validate`: продукт совпадает,
-лицензия активна, не истекла, домен привязан. Иначе — 403/404.
+лицензия активна, домен привязан. Иначе — 403/404.
 
 Привязка доменов идёт по ID лицензии, поэтому на одном домене могут быть
 лицензии разных продуктов.
+
+**Подключить продукт:**
+```bash
+curl -X POST https://license.yourdomain.com/api/admin/products \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Password: <ADMIN_PASSWORD>" \
+  -d '{"id":"market","name":"Market","keyPrefix":"MK","features":["catalog","payments"]}'
+```
 
 **Создать лицензию:**
 ```bash
@@ -247,9 +261,8 @@ curl -X POST https://license.yourdomain.com/api/admin/licenses \
   -H "X-Admin-Password: <ADMIN_PASSWORD>" \
   -d '{"productId":"market"}'
 ```
-Почта и домен **не** указываются при создании: они привязываются к лицензии
-при активации, когда клиент вводит их во время установки на своём сервере.
-Сохраните `licenseKey` из ответа — его получает клиент после оплаты.
+Почта и домен **не** указываются при создании. Сохраните `licenseKey` из
+ответа — его получает клиент после оплаты.
 
 **Активация (клиент):**
 ```bash
@@ -267,7 +280,7 @@ curl "https://license.yourdomain.com/api/release/latest?productId=market&license
 
 - Смените `LICENSE_JWT_SECRET` и `ADMIN_PASSWORD` в `.env`; держите за HTTPS.
 - `.env` и приватные ключи подписи (`release-keys/`) не коммитить.
-- Бэкап БД: `cp license-database.json backups/license-$(date +%F).json` (по cron).
+- Бэкап БД (продукты и лицензии): `cp license-database.json backups/license-$(date +%F).json` (по cron).
 - Журналы валидаций и скачиваний пишутся в `license-database.json`
   (`validationLogs`, `downloadLogs`, с полем `productId`).
 - Если `license-database.json` не читается (повреждён), сервер не запустится.
@@ -275,7 +288,7 @@ curl "https://license.yourdomain.com/api/release/latest?productId=market&license
 
 ### Просмотр БД
 ```bash
-jq '.licenses | length' license-database.json
+jq '.products[] | {id, name, keyPrefix}' license-database.json
 jq '[.licenses[] | .productId] | group_by(.) | map({(.[0]): length}) | add' license-database.json
 jq '.licenses[] | select(.productId=="market" and .status=="active")' license-database.json
 ```

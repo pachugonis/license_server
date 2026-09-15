@@ -3,7 +3,6 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import fsSync from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -22,12 +21,14 @@ const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const DB_FILE = 'license-database.json';
 
-// Справочник продуктов: идентификатор, название, функции, лимиты, срок, префикс ключа.
-const PRODUCTS_FILE = process.env.PRODUCTS_FILE || path.join(__dirname, 'products.json');
-
 // Каталог релизов: releases/<productId>/ с артефактами и манифестом releases.json.
 // Файлы туда кладёт скрипт сборки продукта (по scp), сервер их только раздаёт.
 const RELEASES_DIR = path.resolve(process.env.RELEASES_DIR || 'releases');
+
+// Модель лицензии одна для всех продуктов: пожизненная, на один домен
+// (домен можно сменить через отвязку).
+const LICENSE_TYPE = 'lifetime';
+const MAX_DOMAINS = 1;
 
 // Middleware
 app.use(cors());
@@ -37,108 +38,11 @@ app.use(express.json());
 app.use('/admin', express.static(path.join(__dirname, 'public', 'admin')));
 
 // ============================================================================
-// Product Catalog
-// ============================================================================
-
-// Загрузить и проверить справочник. Ошибка в справочнике — фатальна: лучше
-// не стартовать, чем выдавать ключи с неверными лимитами.
-function loadProducts() {
-  let raw;
-  try {
-    raw = JSON.parse(fsSync.readFileSync(PRODUCTS_FILE, 'utf8'));
-  } catch (error) {
-    throw new Error(`Cannot read products catalog ${PRODUCTS_FILE}: ${error.message}`);
-  }
-
-  const list = Array.isArray(raw?.products) ? raw.products : null;
-  if (!list || !list.length) throw new Error(`${PRODUCTS_FILE}: "products" must be a non-empty array`);
-
-  const catalog = new Map();
-  const prefixes = new Map(); // keyPrefix → id продукта
-
-  for (const p of list) {
-    const where = `${PRODUCTS_FILE}: product "${p?.id}"`;
-    if (typeof p?.id !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(p.id)) {
-      throw new Error(`${where}: id must match ^[a-z0-9][a-z0-9-]*$`);
-    }
-    if (catalog.has(p.id)) throw new Error(`${where}: duplicate id`);
-    if (typeof p.name !== 'string' || !p.name.trim()) throw new Error(`${where}: name is required`);
-
-    // Префикс ключа необязателен: по умолчанию строится из id (market → MARKET-).
-    const keyPrefix = p.keyPrefix ?? `${p.id.replace(/-/g, '').toUpperCase()}-`;
-    if (typeof keyPrefix !== 'string' || !/^[A-Z0-9]+-$/.test(keyPrefix)) {
-      throw new Error(`${where}: keyPrefix must look like "MK-"`);
-    }
-    if (prefixes.has(keyPrefix)) {
-      throw new Error(`${where}: keyPrefix ${keyPrefix} is already used by product "${prefixes.get(keyPrefix)}"`);
-    }
-
-    const maxDomains = p.maxDomains ?? 1;
-    if (!Number.isInteger(maxDomains) || maxDomains < 1) {
-      throw new Error(`${where}: maxDomains must be an integer >= 1`);
-    }
-    if (p.durationDays != null && (!Number.isInteger(p.durationDays) || p.durationDays < 1)) {
-      throw new Error(`${where}: durationDays must be null (perpetual) or an integer >= 1`);
-    }
-    const features = p.features ?? {};
-    if (typeof features !== 'object' || Array.isArray(features)) {
-      throw new Error(`${where}: features must be an object`);
-    }
-    if (p.canChangeDomain != null && typeof p.canChangeDomain !== 'boolean') {
-      throw new Error(`${where}: canChangeDomain must be boolean`);
-    }
-
-    prefixes.set(keyPrefix, p.id);
-    catalog.set(p.id, {
-      id: p.id,
-      name: p.name.trim(),
-      keyPrefix,
-      licenseType: p.licenseType || 'professional',
-      maxDomains,
-      canChangeDomain: p.canChangeDomain ?? true,
-      durationDays: p.durationDays ?? null,
-      features,
-    });
-  }
-
-  return catalog;
-}
-
-let products;
-try {
-  products = loadProducts();
-} catch (error) {
-  console.error(`❌ ${error.message}`);
-  process.exit(1);
-}
-
-function normalizeProductId(raw) {
-  return raw == null ? '' : String(raw).trim().toLowerCase();
-}
-
-// Продукт, от имени которого обращается программа (клиент или админка).
-// Возвращает { ok, productId } либо { ok:false, code, error, message }.
-function resolveProduct(raw) {
-  const productId = normalizeProductId(raw);
-  if (!productId) {
-    return { ok: false, code: 400, error: 'PRODUCT_REQUIRED', message: 'productId is required' };
-  }
-  if (!products.has(productId)) {
-    return { ok: false, code: 400, error: 'UNKNOWN_PRODUCT', message: `Unknown product "${productId}"` };
-  }
-  return { ok: true, productId };
-}
-
-const productMismatch = (productId) => ({
-  error: 'PRODUCT_MISMATCH',
-  message: `License key is not valid for product "${productId}"`,
-});
-
-// ============================================================================
 // Database Functions (JSON-based)
 // ============================================================================
 
 let database = {
+  products: [],
   licenses: [],
   domainBindings: [],
   validationLogs: [],
@@ -156,6 +60,7 @@ async function loadDatabase() {
   try {
     const data = await fs.readFile(DB_FILE, 'utf8');
     database = JSON.parse(data);
+    database.products = database.products || [];
     console.log('✅ Database loaded from file');
   } catch (error) {
     if (error.code === 'ENOENT') {
@@ -181,11 +86,70 @@ async function saveDatabase() {
 // Initialize database
 await loadDatabase();
 
-// Лицензии продукта, удалённого из справочника, перестают проходить проверки.
-const orphaned = [...new Set(database.licenses.map(l => l.productId).filter(id => !products.has(id)))];
-if (orphaned.length) {
-  console.warn(`⚠️  Licenses reference products missing from catalog: ${orphaned.join(', ')}`);
+// ============================================================================
+// Products
+// ============================================================================
+
+// Продукты подключаются из веб-админки и хранятся в базе:
+// { id, name, keyPrefix, features: { name: true }, createdAt }.
+const PRODUCT_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const KEY_PREFIX_RE = /^[A-Z0-9]{1,32}-$/;
+const FEATURE_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+
+function getProduct(productId) {
+  return database.products.find(p => p.id === productId);
 }
+
+function normalizeProductId(raw) {
+  return raw == null ? '' : String(raw).trim().toLowerCase();
+}
+
+// Префикс ключа: заданный вручную (MK или MK-) либо построенный из id (market → MARKET-).
+function normalizeKeyPrefix(raw, productId) {
+  const base = raw == null || String(raw).trim() === ''
+    ? productId.replace(/-/g, '')
+    : String(raw).trim().replace(/-+$/, '');
+  return `${base.toUpperCase()}-`;
+}
+
+// Функции продукта: массив имён или строка через запятую → { name: true }.
+function parseFeatures(raw) {
+  const list = Array.isArray(raw) ? raw : String(raw ?? '').split(/[\s,]+/);
+  const features = {};
+  for (const item of list) {
+    const name = String(item).trim();
+    if (!name) continue;
+    if (!FEATURE_RE.test(name)) return { error: `Invalid feature name "${name}"` };
+    features[name] = true;
+  }
+  return { features };
+}
+
+function productView(product) {
+  return {
+    ...product,
+    releasesDir: productReleasesDir(product.id),
+    licenseCount: database.licenses.filter(l => l.productId === product.id).length,
+  };
+}
+
+// Продукт, от имени которого обращается программа (клиент или админка).
+// Возвращает { ok, productId } либо { ok:false, code, error, message }.
+function resolveProduct(raw) {
+  const productId = normalizeProductId(raw);
+  if (!productId) {
+    return { ok: false, code: 400, error: 'PRODUCT_REQUIRED', message: 'productId is required' };
+  }
+  if (!getProduct(productId)) {
+    return { ok: false, code: 400, error: 'UNKNOWN_PRODUCT', message: `Unknown product "${productId}"` };
+  }
+  return { ok: true, productId };
+}
+
+const productMismatch = (productId) => ({
+  error: 'PRODUCT_MISMATCH',
+  message: `License key is not valid for product "${productId}"`,
+});
 
 // ============================================================================
 // Helper Functions
@@ -233,6 +197,12 @@ function getLicenseByKey(licenseKey) {
   return database.licenses.find(l => l.licenseKey === licenseKey);
 }
 
+// Функции лицензии берутся из продукта на момент запроса: изменение набора
+// функций в админке сразу действует для всех ключей продукта.
+function licenseFeatures(license) {
+  return getProduct(license.productId)?.features || {};
+}
+
 function getDomainBindings(licenseId) {
   return database.domainBindings.filter(b => b.licenseId === licenseId && b.isActive);
 }
@@ -270,7 +240,7 @@ function isDomainMatch(bindings, domain) {
 // ============================================================================
 
 // Каталог релизов продукта — releases/<productId>/. productId здесь всегда
-// из справочника (проверен regex'ом), поэтому выйти за RELEASES_DIR нельзя.
+// проверен PRODUCT_ID_RE, поэтому выйти за RELEASES_DIR нельзя.
 function productReleasesDir(productId) {
   return path.join(RELEASES_DIR, productId);
 }
@@ -383,7 +353,7 @@ app.get('/api/health', (req, res) => {
     status: 'ok',
     timestamp: Date.now(),
     version: VERSION,
-    products: [...products.keys()],
+    products: database.products.map(p => p.id),
     totalLicenses: database.licenses.length,
     activeLicenses: database.licenses.filter(l => l.status === 'active').length
   });
@@ -417,10 +387,103 @@ app.post('/api/admin/login', (req, res) => {
   });
 });
 
-// Справочник продуктов (для выбора продукта в веб-админке)
+// ---- Продукты ----
+
 app.get('/api/admin/products', authenticateAdmin, (req, res) => {
-  res.json({ success: true, products: [...products.values()] });
+  res.json({ success: true, products: database.products.map(productView) });
 });
+
+// Подключить продукт: { id, name, keyPrefix?, features? }.
+// id и префикс после создания не меняются: id хранится в лицензиях и токенах
+// клиентов и задаёт каталог релизов.
+app.post('/api/admin/products', authenticateAdmin, async (req, res) => {
+  const body = req.body || {};
+  const id = normalizeProductId(body.id);
+  const name = String(body.name ?? '').trim();
+  const invalid = (message) => res.status(400).json({ success: false, error: 'INVALID_PRODUCT', message });
+
+  if (!PRODUCT_ID_RE.test(id)) {
+    return invalid('id: lowercase latin letters, digits and "-", up to 32 chars, starting with a letter or digit');
+  }
+  if (getProduct(id)) {
+    return res.status(409).json({ success: false, error: 'PRODUCT_EXISTS', message: `Product "${id}" already exists` });
+  }
+  if (!name || name.length > 100) return invalid('name is required (up to 100 chars)');
+
+  const keyPrefix = normalizeKeyPrefix(body.keyPrefix, id);
+  if (!KEY_PREFIX_RE.test(keyPrefix)) {
+    return invalid('keyPrefix: latin letters and digits, up to 32 chars');
+  }
+  const prefixOwner = database.products.find(p => p.keyPrefix === keyPrefix);
+  if (prefixOwner) {
+    return res.status(409).json({
+      success: false,
+      error: 'PREFIX_IN_USE',
+      message: `Key prefix ${keyPrefix} is already used by product "${prefixOwner.id}"`,
+    });
+  }
+
+  const parsed = parseFeatures(body.features);
+  if (parsed.error) return invalid(parsed.error);
+
+  const product = { id, name, keyPrefix, features: parsed.features, createdAt: Date.now() };
+  database.products.push(product);
+  await saveDatabase();
+
+  // Каталог релизов создаём сразу; без него сервер просто ответит NO_RELEASE.
+  await fs.mkdir(productReleasesDir(id), { recursive: true })
+    .catch(error => console.warn(`⚠️  Cannot create releases dir for "${id}": ${error.message}`));
+
+  res.json({ success: true, product: productView(product), message: 'Product created' });
+});
+
+// Изменить название и набор функций продукта
+app.patch('/api/admin/products/:id', authenticateAdmin, async (req, res) => {
+  const product = getProduct(req.params.id);
+  if (!product) {
+    return res.status(404).json({ success: false, error: 'NOT_FOUND', message: 'Product not found' });
+  }
+
+  const body = req.body || {};
+  if (body.name !== undefined) {
+    const name = String(body.name).trim();
+    if (!name || name.length > 100) {
+      return res.status(400).json({ success: false, error: 'INVALID_PRODUCT', message: 'name is required (up to 100 chars)' });
+    }
+    product.name = name;
+  }
+  if (body.features !== undefined) {
+    const parsed = parseFeatures(body.features);
+    if (parsed.error) {
+      return res.status(400).json({ success: false, error: 'INVALID_PRODUCT', message: parsed.error });
+    }
+    product.features = parsed.features;
+  }
+
+  await saveDatabase();
+  res.json({ success: true, product: productView(product), message: 'Product updated' });
+});
+
+// Удалить продукт можно, только пока по нему не выпущено ни одного ключа
+app.delete('/api/admin/products/:id', authenticateAdmin, async (req, res) => {
+  const product = getProduct(req.params.id);
+  if (!product) {
+    return res.status(404).json({ success: false, error: 'NOT_FOUND', message: 'Product not found' });
+  }
+  if (database.licenses.some(l => l.productId === product.id)) {
+    return res.status(409).json({
+      success: false,
+      error: 'PRODUCT_IN_USE',
+      message: 'Product has licenses and cannot be deleted',
+    });
+  }
+
+  database.products = database.products.filter(p => p !== product);
+  await saveDatabase();
+  res.json({ success: true, message: 'Product deleted' });
+});
+
+// ---- Лицензии ----
 
 // Список лицензий с привязанными доменами (для веб-админки).
 // Необязательный ?productId= отбирает лицензии одного продукта.
@@ -441,31 +504,28 @@ app.get('/api/admin/licenses', authenticateAdmin, (req, res) => {
 });
 
 app.post('/api/admin/licenses', authenticateAdmin, async (req, res) => {
-  // Тип, функции, лимиты и срок берутся из справочника продуктов и копируются
-  // в лицензию: последующая правка справочника не меняет уже выданные ключи.
-  // Почта и домен не задаются — привязываются при активации клиентом.
+  // Все лицензии пожизненные, на один домен. Почта и домен не задаются —
+  // привязываются при активации клиентом.
   const resolved = resolveProduct((req.body || {}).productId);
   if (!resolved.ok) {
     return res.status(resolved.code).json({ success: false, error: resolved.error, message: resolved.message });
   }
   const { productId } = resolved;
-  const product = products.get(productId);
+  const product = getProduct(productId);
 
   const license = {
     id: database.nextId.license++,
     licenseKey: generateLicenseKey(product.keyPrefix),
     productId,
-    licenseType: product.licenseType,
+    licenseType: LICENSE_TYPE,
     status: 'active',
     customerId: null,        // присваивается при активации
     customerEmail: null,     // привязывается при активации
     issuedAt: Date.now(),
-    expiresAt: null,         // при сроке — отсчитывается от первой активации
-    durationDays: product.durationDays,
+    expiresAt: null,         // пожизненная
     activatedAt: null,
-    maxDomains: product.maxDomains,
-    canChangeDomain: product.canChangeDomain,
-    features: { ...product.features },
+    maxDomains: MAX_DOMAINS,
+    canChangeDomain: true,
     validationCount: 0,
     lastValidated: null
   };
@@ -507,6 +567,8 @@ app.patch('/api/admin/licenses/:id/status', authenticateAdmin, async (req, res) 
     message: `License status changed to ${status}`,
   });
 });
+
+// ---- Клиентские эндпоинты ----
 
 app.post('/api/license/activate', async (req, res) => {
   const { licenseKey, customerEmail, domain, protocol = 'https', termsAgreed } = req.body;
@@ -588,14 +650,11 @@ app.post('/api/license/activate', async (req, res) => {
 
   const now = Date.now();
 
-  // Первая активация: привязываем e-mail, введённый клиентом, и запускаем срок.
+  // Первая активация: привязываем e-mail, введённый клиентом.
   if (!license.customerEmail) {
     license.customerEmail = customerEmail;
     if (!license.customerId) license.customerId = crypto.randomBytes(8).toString('hex');
     license.activatedAt = now;
-    if (license.durationDays && !license.expiresAt) {
-      license.expiresAt = now + license.durationDays * 24 * 60 * 60 * 1000;
-    }
   }
 
   if (existingBinding) {
@@ -628,6 +687,7 @@ app.post('/api/license/activate', async (req, res) => {
     success: true,
     license: {
       ...license,
+      features: licenseFeatures(license),
       boundDomains: updatedBindings
     },
     token,
@@ -755,7 +815,7 @@ app.post('/api/license/validate', (req, res) => {
     status: 'active',
     expiresAt: license.expiresAt,
     daysRemaining,
-    features: license.features,
+    features: licenseFeatures(license),
     domainMatch: true,
     canChangeDomain: license.canChangeDomain,
     message: 'License is valid',
@@ -799,7 +859,7 @@ app.post('/api/license/unbind-domain', authenticate, async (req, res) => {
     return res.status(403).json({
       success: false,
       error: 'DOMAIN_CHANGE_NOT_ALLOWED',
-      message: 'This license type does not allow domain changes. Upgrade to Professional license.',
+      message: 'This license does not allow domain changes',
     });
   }
 
@@ -893,7 +953,7 @@ app.get('/api/license/status', authenticate, (req, res) => {
     status: license.status,
     expiresAt: license.expiresAt,
     daysRemaining,
-    features: license.features,
+    features: licenseFeatures(license),
     boundDomains: bindings.map(b => b.domain),
     maxDomains: license.maxDomains,
     canChangeDomain: license.canChangeDomain,
@@ -1003,14 +1063,10 @@ app.listen(PORT, () => {
   console.log(`  ✅ Server running on port ${PORT}`);
   console.log(`  🌐 Health check: http://localhost:${PORT}/api/health`);
   console.log(`  💾 Database: ${DB_FILE}`);
-  console.log(`  🗂  Products: ${PRODUCTS_FILE}`);
   console.log(`  📦 Releases:  ${RELEASES_DIR}/<productId>/`);
+  console.log(`  🗂  Products:  ${database.products.length} (управление — /admin)`);
   console.log('');
-  console.log('  Products:');
-  for (const p of products.values()) {
-    const term = p.durationDays ? `${p.durationDays} дн.` : 'бессрочно';
-    console.log(`    • ${p.name} (${p.id}, ${p.keyPrefix}) — ${term}, доменов: ${p.maxDomains}`);
-  }
+  console.log('  License model: пожизненная, 1 домен (привязка при активации)');
   console.log('');
   console.log('  Press Ctrl+C to stop');
   console.log('');

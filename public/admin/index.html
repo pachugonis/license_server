@@ -21,6 +21,7 @@
       --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     html, body { margin: 0; height: 100%; }
     body {
       background: radial-gradient(1200px 600px at 80% -10%, #16202c 0%, var(--bg) 55%);
@@ -28,7 +29,9 @@
       font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
     button { font: inherit; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
     a { color: var(--accent); }
+    code, .mono { font-family: var(--mono); font-size: 13px; }
 
     /* ---------- Login ---------- */
     #login {
@@ -50,11 +53,13 @@
     .brand h1 { font-size: 16px; margin: 0; letter-spacing: .2px; }
     .brand small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
     label { display: block; color: var(--muted); font-size: 12px; margin: 14px 0 6px; }
+    .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
     input, select {
       width: 100%; padding: 10px 12px; color: var(--text);
       background: var(--bg); border: 1px solid var(--border); border-radius: 9px; outline: none;
     }
     input:focus, select:focus { border-color: var(--accent); }
+    input[readonly] { color: var(--muted); }
     .btn {
       display: inline-flex; align-items: center; justify-content: center; gap: 8px;
       background: var(--accent); color: #fff; border: none; padding: 10px 16px;
@@ -64,18 +69,24 @@
     .btn.block { width: 100%; margin-top: 20px; }
     .btn.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
     .btn.ghost:hover { background: var(--panel-2); }
+    .btn.danger { color: var(--red); }
     .btn.sm { padding: 6px 10px; font-size: 12px; font-weight: 500; border-radius: 7px; }
     .err { color: var(--red); font-size: 13px; margin-top: 14px; min-height: 18px; }
 
     /* ---------- App ---------- */
     #app { display: none; }
     header.top {
-      display: flex; align-items: center; justify-content: space-between;
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
       padding: 16px 24px; border-bottom: 1px solid var(--border);
       background: rgba(19,26,35,.6); backdrop-filter: blur(6px);
       position: sticky; top: 0; z-index: 5;
     }
     .wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+    .tab { background: transparent; border: none; color: var(--muted); padding: 10px 14px;
+      border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 600; }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--text); border-bottom-color: var(--accent); }
     .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px; }
     .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
     .stat .n { font-size: 26px; font-weight: 700; }
@@ -94,7 +105,7 @@
     tr:hover td { background: var(--panel-2); }
     .key { font-family: var(--mono); font-size: 13px; }
     .muted { color: var(--muted); }
-    .domains span { display: inline-block; font-family: var(--mono); font-size: 12px;
+    .chips span { display: inline-block; font-family: var(--mono); font-size: 12px;
       background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 1px 7px; margin: 1px 2px; }
     .product { display: inline-block; font-size: 12px; font-weight: 600; white-space: nowrap;
       border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; }
@@ -119,16 +130,23 @@
     #toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
 
     /* modal */
-    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; place-items: center; z-index: 20; }
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; place-items: center; z-index: 20; padding: 16px; }
     .overlay.show { display: grid; }
-    .modal { width: 460px; max-width: 92vw; padding: 24px; }
+    .modal { width: 480px; max-width: 100%; padding: 24px; }
     .modal h2 { margin: 0 0 6px; font-size: 17px; }
     .keybox { font-family: var(--mono); font-size: 18px; letter-spacing: 1px; text-align: center;
-      background: var(--bg); border: 1px dashed var(--accent); border-radius: 10px; padding: 16px; margin: 18px 0; user-select: all; }
+      background: var(--bg); border: 1px dashed var(--accent); border-radius: 10px; padding: 16px; margin: 18px 0; user-select: all; overflow-wrap: anywhere; }
     .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+    .steps { margin: 12px 0 0; padding-left: 20px; }
+    .steps li { margin: 8px 0; }
+    .steps code { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; overflow-wrap: anywhere; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
     @media (max-width: 720px) {
       .stats { grid-template-columns: repeat(2, 1fr); }
       table { font-size: 13px; }
+      .grid2 { grid-template-columns: 1fr; }
+      header.top { padding: 12px 16px; }
+      .wrap { padding: 16px; }
     }
   </style>
 </head>
@@ -165,36 +183,106 @@
     </header>
 
     <div class="wrap">
-      <div class="stats" id="stats"></div>
-      <div class="toolbar">
-        <div class="filters">
-          <input id="search" placeholder="Поиск по ключу, e-mail или домену…" />
-          <select id="productFilter" aria-label="Фильтр по продукту"></select>
+      <nav class="tabs">
+        <button class="tab active" data-tab="licenses">Лицензии</button>
+        <button class="tab" data-tab="products">Продукты</button>
+      </nav>
+
+      <!-- ----- Лицензии ----- -->
+      <section id="licensesTab">
+        <div class="stats" id="stats"></div>
+        <div class="toolbar">
+          <div class="filters">
+            <input id="search" placeholder="Поиск по ключу, e-mail или домену…" />
+            <select id="productFilter" aria-label="Фильтр по продукту"></select>
+          </div>
+          <button class="btn ghost sm" id="refreshBtn">Обновить</button>
         </div>
-        <button class="btn ghost sm" id="refreshBtn">Обновить</button>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Ключ</th><th>Продукт</th><th>Статус</th><th>E-mail</th><th>Домены</th>
-              <th>Создана</th><th>Проверок</th><th></th>
-            </tr>
-          </thead>
-          <tbody id="rows"></tbody>
-        </table>
-      </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Ключ</th><th>Продукт</th><th>Статус</th><th>E-mail</th><th>Домен</th>
+                <th>Создана</th><th>Проверок</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ----- Продукты ----- -->
+      <section id="productsTab" hidden>
+        <div class="toolbar">
+          <p class="muted" style="margin:0">Лицензия на любой продукт — пожизненная, на 1 домен.</p>
+          <button class="btn" id="addProductBtn">+ Подключить продукт</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Продукт</th><th>productId</th><th>Префикс ключа</th><th>Функции</th>
+                <th>Лицензий</th><th>Подключён</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="productRows"></tbody>
+          </table>
+        </div>
+      </section>
     </div>
   </main>
 
-  <!-- ===== Modal: choose product ===== -->
+  <!-- ===== Modal: product form ===== -->
+  <div class="overlay" id="productModal">
+    <form class="card modal" id="productForm" novalidate>
+      <h2 id="pfTitle">Подключить продукт</h2>
+      <label for="pfName">Название</label>
+      <input id="pfName" maxlength="100" placeholder="Market" required />
+      <div class="grid2">
+        <div>
+          <label for="pfId">Идентификатор (productId)</label>
+          <input id="pfId" class="mono" maxlength="32" placeholder="market" autocomplete="off" />
+        </div>
+        <div>
+          <label for="pfPrefix">Префикс ключа</label>
+          <input id="pfPrefix" class="mono" maxlength="33" autocomplete="off" />
+        </div>
+      </div>
+      <div class="hint" id="pfIdHint">Латиница, цифры и дефис. Этот идентификатор передаёт клиентская программа; после подключения id и префикс не меняются.</div>
+      <label for="pfFeatures">Функции</label>
+      <input id="pfFeatures" class="mono" placeholder="api, telegram, analytics" autocomplete="off" />
+      <div class="hint">Через запятую. Отдаются клиенту в validate и status; изменения действуют сразу для всех ключей продукта.</div>
+      <div class="err" id="pfErr"></div>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" data-close="productModal">Отмена</button>
+        <button class="btn" type="submit" id="pfSubmit">Подключить</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- ===== Modal: product connected ===== -->
+  <div class="overlay" id="productDoneModal">
+    <div class="card modal">
+      <h2>Продукт подключён</h2>
+      <p class="muted" style="margin:0">Теперь для него можно генерировать ключи вида <span class="key" id="pdKey"></span>.</p>
+      <ol class="steps">
+        <li>В клиентской программе передавайте <code id="pdProduct"></code> в activate, validate и запросах релизов.</li>
+        <li>Публикуйте релизы в <code id="pdDir"></code>.</li>
+        <li>Подписывайте релизы отдельной парой ключей этого продукта (хранится на машине сборки).</li>
+      </ol>
+      <div class="modal-actions">
+        <button class="btn" data-close="productDoneModal">Готово</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Modal: choose product for key ===== -->
   <div class="overlay" id="genModal">
     <div class="card modal">
       <h2>Новая лицензия</h2>
-      <p class="muted">Функции, лимиты и срок берутся из справочника продукта. Почта и домен привяжутся при активации.</p>
+      <p class="muted">Пожизненная, на 1 домен. Почта и домен привяжутся при активации.</p>
       <label for="genProduct">Продукт</label>
       <select id="genProduct"></select>
-      <p class="muted" id="genSummary"></p>
       <div class="modal-actions">
         <button class="btn ghost" data-close="genModal">Отмена</button>
         <button class="btn" id="createBtn">Создать</button>
@@ -220,11 +308,17 @@
   <script>
     const TOKEN_KEY = 'ek_admin_token';
     const FILTER_KEY = 'ls_product_filter';
+    const TAB_KEY = 'ls_tab';
     let licenses = [];
     let products = [];
+    let editingProductId = null; // null — форма в режиме подключения нового продукта
 
     const $ = (s) => document.querySelector(s);
     const token = () => localStorage.getItem(TOKEN_KEY);
+    const store = {
+      get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+      set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+    };
 
     // E-mail и домены вводят клиенты при активации — выводим только экранированными.
     const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
@@ -238,6 +332,9 @@
       toast._t = setTimeout(() => t.classList.remove('show'), 2200);
     }
 
+    const openModal = (id) => $('#' + id).classList.add('show');
+    const closeModal = (id) => $('#' + id).classList.remove('show');
+
     async function api(path, opts = {}) {
       const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
       if (token()) headers['Authorization'] = 'Bearer ' + token();
@@ -248,9 +345,11 @@
       return data;
     }
 
-    function fmtDate(ms) {
+    function fmtDate(ms, withTime = true) {
       if (!ms) return '—';
-      return new Date(ms).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+      const opts = { day: '2-digit', month: '2-digit', year: 'numeric' };
+      if (withTime) Object.assign(opts, { hour: '2-digit', minute: '2-digit' });
+      return new Date(ms).toLocaleString('ru-RU', opts);
     }
 
     async function copy(text) {
@@ -259,13 +358,7 @@
     }
 
     const productName = (id) => (products.find(p => p.id === id) || {}).name || id;
-
-    function productSummary(p) {
-      const term = p.durationDays ? `${p.durationDays} дн. с активации` : 'бессрочно';
-      const domains = `${p.maxDomains} ${p.maxDomains === 1 ? 'домен' : 'доменов'}`;
-      const features = Object.keys(p.features || {}).filter(k => p.features[k]).length;
-      return `${p.licenseType} · ${term} · ${domains} · функций: ${features} · ключ ${p.keyPrefix}…`;
-    }
+    const licenseCount = (id) => licenses.filter(l => l.productId === id).length;
 
     // ---------- Auth ----------
     $('#loginForm').addEventListener('submit', async (e) => {
@@ -295,34 +388,43 @@
     async function showApp() {
       $('#login').style.display = 'none';
       $('#app').style.display = 'block';
-      await loadProducts();
+      showTab(store.get(TAB_KEY) === 'products' ? 'products' : 'licenses');
       await load();
     }
 
-    // ---------- Data ----------
-    async function loadProducts() {
-      try {
-        products = (await api('/api/admin/products')).products || [];
-      } catch (err) { toast(err.message); }
+    // ---------- Tabs ----------
+    function showTab(name) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+      $('#licensesTab').hidden = name !== 'licenses';
+      $('#productsTab').hidden = name !== 'products';
+      store.set(TAB_KEY, name);
+    }
+    document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab)));
 
-      const saved = localStorage.getItem(FILTER_KEY) || '';
+    // ---------- Data ----------
+    async function load() {
+      try {
+        const [p, l] = await Promise.all([api('/api/admin/products'), api('/api/admin/licenses')]);
+        products = p.products || [];
+        licenses = l.licenses || [];
+        renderProductOptions();
+        render();
+        renderProducts();
+      } catch (err) { toast(err.message); }
+    }
+    $('#refreshBtn').addEventListener('click', load);
+
+    function renderProductOptions() {
+      const current = $('#productFilter').value || store.get(FILTER_KEY) || '';
       $('#productFilter').innerHTML = `<option value="">Все продукты</option>` +
         products.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
-      $('#productFilter').value = products.some(p => p.id === saved) ? saved : '';
+      $('#productFilter').value = products.some(p => p.id === current) ? current : '';
 
       $('#genProduct').innerHTML = products.map(p =>
         `<option value="${esc(p.id)}">${esc(p.name)} (${esc(p.keyPrefix)})</option>`).join('');
     }
 
-    async function load() {
-      try {
-        const data = await api('/api/admin/licenses');
-        licenses = data.licenses || [];
-        render();
-      } catch (err) { toast(err.message); }
-    }
-    $('#refreshBtn').addEventListener('click', load);
-
+    // ---------- Licenses ----------
     function renderStats(list) {
       const by = (s) => list.filter(l => l.status === s).length;
       const stats = [
@@ -348,14 +450,16 @@
       });
 
       if (!list.length) {
-        const msg = licenses.length ? 'Ничего не найдено.' : 'Лицензий пока нет. Нажмите «Сгенерировать ключ».';
+        const msg = !products.length
+          ? 'Сначала подключите продукт на вкладке «Продукты».'
+          : licenses.length ? 'Ничего не найдено.' : 'Лицензий пока нет. Нажмите «Сгенерировать ключ».';
         $('#rows').innerHTML = `<tr><td colspan="8" class="empty">${msg}</td></tr>`;
         return;
       }
 
       $('#rows').innerHTML = list.map(l => {
         const domains = (l.boundDomains || []).length
-          ? `<div class="domains">${l.boundDomains.map(d => `<span>${esc(d.domain)}</span>`).join('')}</div>`
+          ? `<div class="chips">${l.boundDomains.map(d => `<span>${esc(d.domain)}</span>`).join('')}</div>`
           : '<span class="muted">не привязан</span>';
         return `<tr>
           <td><span class="key">${esc(l.licenseKey)}</span>
@@ -376,14 +480,14 @@
         </tr>`;
       }).join('');
 
-      document.querySelectorAll('[data-copy]').forEach(b =>
+      document.querySelectorAll('#rows [data-copy]').forEach(b =>
         b.addEventListener('click', () => copy(b.dataset.copy)));
       document.querySelectorAll('.statusSel').forEach(sel =>
         sel.addEventListener('change', () => changeStatus(sel.dataset.id, sel.value)));
     }
     $('#search').addEventListener('input', render);
     $('#productFilter').addEventListener('change', () => {
-      try { localStorage.setItem(FILTER_KEY, $('#productFilter').value); } catch {}
+      store.set(FILTER_KEY, $('#productFilter').value);
       render();
     });
 
@@ -395,20 +499,16 @@
       } catch (err) { toast(err.message); await load(); }
     }
 
-    // ---------- Generate ----------
-    function updateGenSummary() {
-      const p = products.find(p => p.id === $('#genProduct').value);
-      $('#genSummary').textContent = p ? productSummary(p) : '';
-    }
-    $('#genProduct').addEventListener('change', updateGenSummary);
-
+    // ---------- Generate key ----------
     $('#genBtn').addEventListener('click', () => {
-      if (!products.length) return toast('Справочник продуктов не загружен');
+      if (!products.length) {
+        showTab('products');
+        return toast('Сначала подключите продукт');
+      }
       // По умолчанию предлагаем продукт, выбранный в фильтре
       const filtered = $('#productFilter').value;
       if (filtered) $('#genProduct').value = filtered;
-      updateGenSummary();
-      $('#genModal').classList.add('show');
+      openModal('genModal');
     });
 
     $('#createBtn').addEventListener('click', async () => {
@@ -416,20 +516,144 @@
       $('#createBtn').disabled = true;
       try {
         const data = await api('/api/admin/licenses', { method: 'POST', body: JSON.stringify({ productId }) });
-        const p = products.find(p => p.id === data.license.productId);
         $('#newKey').textContent = data.license.licenseKey;
-        $('#newKeySummary').textContent = `${productName(data.license.productId)} · ${p ? productSummary(p) : ''}. ` +
+        $('#newKeySummary').textContent = `${productName(data.license.productId)} · пожизненная · 1 домен. ` +
           'Передайте ключ клиенту — почта и домен привяжутся при активации.';
-        $('#genModal').classList.remove('show');
-        $('#keyModal').classList.add('show');
+        closeModal('genModal');
+        openModal('keyModal');
         await load();
       } catch (err) { toast(err.message); }
       finally { $('#createBtn').disabled = false; }
     });
-
     $('#copyKeyBtn').addEventListener('click', () => copy($('#newKey').textContent));
+
+    // ---------- Products ----------
+    function renderProducts() {
+      if (!products.length) {
+        $('#productRows').innerHTML = `<tr><td colspan="7" class="empty">Продуктов пока нет. Нажмите «Подключить продукт».</td></tr>`;
+        return;
+      }
+
+      $('#productRows').innerHTML = products.map(p => {
+        const features = Object.keys(p.features || {});
+        const count = licenseCount(p.id);
+        return `<tr>
+          <td><strong>${esc(p.name)}</strong></td>
+          <td><span class="key">${esc(p.id)}</span>
+            <button class="copy" data-copy="${esc(p.id)}">copy</button></td>
+          <td class="key">${esc(p.keyPrefix)}</td>
+          <td>${features.length
+            ? `<div class="chips">${features.map(f => `<span>${esc(f)}</span>`).join('')}</div>`
+            : '<span class="muted">—</span>'}</td>
+          <td>${count}</td>
+          <td class="muted">${fmtDate(p.createdAt, false)}</td>
+          <td><div class="row-actions">
+            <button class="btn ghost sm" data-edit="${esc(p.id)}">Изменить</button>
+            <button class="btn ghost sm danger" data-delete="${esc(p.id)}" ${count ? 'disabled title="По продукту выпущены ключи"' : ''}>Удалить</button>
+          </div></td>
+        </tr>`;
+      }).join('');
+
+      document.querySelectorAll('#productRows [data-copy]').forEach(b =>
+        b.addEventListener('click', () => copy(b.dataset.copy)));
+      document.querySelectorAll('[data-edit]').forEach(b =>
+        b.addEventListener('click', () => openProductForm(products.find(p => p.id === b.dataset.edit))));
+      document.querySelectorAll('[data-delete]').forEach(b =>
+        b.addEventListener('click', () => deleteProduct(b.dataset.delete)));
+    }
+
+    // id из латинского названия: "My Market" → "my-market"
+    const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32);
+    const derivedPrefix = (id) => id ? id.replace(/-/g, '').toUpperCase() + '-' : '';
+
+    function updatePrefixPlaceholder() {
+      $('#pfPrefix').placeholder = derivedPrefix($('#pfId').value.trim().toLowerCase()) || 'MK-';
+    }
+
+    function openProductForm(product) {
+      editingProductId = product ? product.id : null;
+      $('#pfTitle').textContent = product ? 'Изменить продукт' : 'Подключить продукт';
+      $('#pfSubmit').textContent = product ? 'Сохранить' : 'Подключить';
+      $('#pfName').value = product ? product.name : '';
+      $('#pfId').value = product ? product.id : '';
+      $('#pfPrefix').value = product ? product.keyPrefix : '';
+      $('#pfId').readOnly = $('#pfPrefix').readOnly = !!product;
+      $('#pfId').dataset.touched = product ? '1' : '';
+      $('#pfFeatures').value = product ? Object.keys(product.features || {}).join(', ') : '';
+      $('#pfErr').textContent = '';
+      updatePrefixPlaceholder();
+      openModal('productModal');
+      $('#pfName').focus();
+    }
+    $('#addProductBtn').addEventListener('click', () => openProductForm(null));
+
+    // Пока id не правили вручную, он повторяет название
+    $('#pfName').addEventListener('input', () => {
+      if (editingProductId || $('#pfId').dataset.touched) return;
+      $('#pfId').value = slugify($('#pfName').value);
+      updatePrefixPlaceholder();
+    });
+    $('#pfId').addEventListener('input', () => {
+      $('#pfId').dataset.touched = $('#pfId').value ? '1' : '';
+      updatePrefixPlaceholder();
+    });
+
+    $('#productForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      $('#pfErr').textContent = '';
+      const name = $('#pfName').value.trim();
+      const id = $('#pfId').value.trim().toLowerCase();
+      const keyPrefix = $('#pfPrefix').value.trim();
+      const features = $('#pfFeatures').value.split(/[\s,]+/).filter(Boolean);
+
+      if (!name) return ($('#pfErr').textContent = 'Укажите название');
+      if (!editingProductId && !/^[a-z0-9][a-z0-9-]{0,31}$/.test(id)) {
+        return ($('#pfErr').textContent = 'Идентификатор: латиница в нижнем регистре, цифры и дефис');
+      }
+      if (!editingProductId && keyPrefix && !/^[A-Za-z0-9]{1,32}-?$/.test(keyPrefix)) {
+        return ($('#pfErr').textContent = 'Префикс: латиница и цифры, например MK');
+      }
+      const badFeature = features.find(f => !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(f));
+      if (badFeature) return ($('#pfErr').textContent = `Некорректное имя функции: ${badFeature}`);
+
+      $('#pfSubmit').disabled = true;
+      try {
+        if (editingProductId) {
+          await api(`/api/admin/products/${encodeURIComponent(editingProductId)}`, {
+            method: 'PATCH', body: JSON.stringify({ name, features }),
+          });
+          closeModal('productModal');
+          toast('Продукт обновлён');
+        } else {
+          const data = await api('/api/admin/products', {
+            method: 'POST', body: JSON.stringify({ id, name, keyPrefix, features }),
+          });
+          closeModal('productModal');
+          $('#pdKey').textContent = `${data.product.keyPrefix}XXXX-XXXX-XXXX-XXXX`;
+          $('#pdProduct').textContent = `productId: "${data.product.id}"`;
+          $('#pdDir').textContent = data.product.releasesDir + '/';
+          openModal('productDoneModal');
+        }
+        await load();
+      } catch (err) {
+        $('#pfErr').textContent = err.message;
+      } finally {
+        $('#pfSubmit').disabled = false;
+      }
+    });
+
+    async function deleteProduct(id) {
+      if (!confirm(`Удалить продукт «${productName(id)}»?`)) return;
+      try {
+        await api(`/api/admin/products/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        toast('Продукт удалён');
+        await load();
+      } catch (err) { toast(err.message); }
+    }
+
+    // ---------- Modals ----------
     document.querySelectorAll('[data-close]').forEach(b =>
-      b.addEventListener('click', () => $('#' + b.dataset.close).classList.remove('show')));
+      b.addEventListener('click', () => closeModal(b.dataset.close)));
     document.querySelectorAll('.overlay').forEach(o =>
       o.addEventListener('click', (e) => { if (e.target === o) o.classList.remove('show'); }));
 
