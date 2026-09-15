@@ -117,6 +117,9 @@
     .badge.expired { color: var(--muted); background: rgba(139,154,171,.12); }
 
     .row-actions { display: flex; gap: 6px; align-items: center; }
+    /* Глобальный select растягивается на 100% — во flex-строке его сжимает до нуля */
+    .row-actions select { width: auto; flex: none; padding: 6px 8px; font-size: 12px; border-radius: 7px; }
+    .row-actions .btn { flex: none; white-space: nowrap; }
     .copy { background: transparent; border: 1px solid var(--border); color: var(--muted);
       border-radius: 6px; padding: 2px 7px; font-size: 11px; }
     .copy:hover { color: var(--text); border-color: var(--accent); }
