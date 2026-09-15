@@ -26,6 +26,22 @@ sudo DOMAIN=license.example.com ENABLE_SSL=y LE_EMAIL=you@example.com \
 После установки веб-админка доступна на `https://<домен>/admin`. Повторный запуск
 безопасен — `.env` и `license-database.json` (продукты и лицензии) не перезаписываются.
 
+## Обновление установленного сервера
+
+Когда сервер уже развёрнут, повторять установку не нужно: `update-license-server.sh`
+обновляет только код. Он делает `git pull`, сохраняет копию базы в
+`/var/backups/license-server/` (хранятся последние 10), копирует файлы в
+`/opt/license-server`, запускает `npm ci`, только если изменились зависимости,
+и перезапускает сервис. nginx, SSL, UFW и `.env` скрипт не трогает.
+
+```bash
+# на VPS, из каталога с клоном репозитория
+sudo bash update-license-server.sh
+
+# если файлы обновлены вручную (scp/rsync), без git pull
+sudo NO_PULL=1 bash update-license-server.sh
+```
+
 ## Ручная установка за несколько минут
 
 ```bash
