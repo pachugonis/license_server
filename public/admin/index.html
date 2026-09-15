@@ -81,7 +81,8 @@
       background: rgba(19,26,35,.6); backdrop-filter: blur(6px);
       position: sticky; top: 0; z-index: 5;
     }
-    .wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
+    /* Содержимое тянется на всю ширину окна; на узком экране таблицы прокручиваются в .table-wrap */
+    .wrap { padding: 24px; }
     .tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
     .tab { background: transparent; border: none; color: var(--muted); padding: 10px 14px;
       border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 600; }
@@ -99,12 +100,14 @@
 
     table { width: 100%; border-collapse: collapse; background: var(--panel);
       border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
-    th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    th, td { text-align: left; padding: 12px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
     th { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
     tr:last-child td { border-bottom: none; }
     tr:hover td { background: var(--panel-2); }
     .key { font-family: var(--mono); font-size: 13px; }
     .muted { color: var(--muted); }
+    /* Ключ не переносим по дефисам */
+    td .key { white-space: nowrap; }
     .chips span { display: inline-block; font-family: var(--mono); font-size: 12px;
       background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 1px 7px; margin: 1px 2px; }
     .product { display: inline-block; font-size: 12px; font-weight: 600; white-space: nowrap;
@@ -120,6 +123,8 @@
     /* Глобальный select растягивается на 100% — во flex-строке его сжимает до нуля */
     .row-actions select { width: auto; flex: none; padding: 6px 8px; font-size: 12px; border-radius: 7px; }
     .row-actions .btn { flex: none; white-space: nowrap; }
+    /* В таблице при нехватке ширины кнопка уходит под список, а не за границу */
+    td .row-actions { flex-wrap: wrap; }
     .copy { background: transparent; border: 1px solid var(--border); color: var(--muted);
       border-radius: 6px; padding: 2px 7px; font-size: 11px; }
     .copy:hover { color: var(--text); border-color: var(--accent); }
